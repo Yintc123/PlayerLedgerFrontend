@@ -101,6 +101,12 @@ describe('config', () => {
       expect(config.api.basePath).toBe('/api/v1');
     });
 
+    it('should default CMS_API_BASE_PATH to /api when not set', () => {
+      delete process.env.CMS_API_BASE_PATH;
+      const config = createConfig();
+      expect(config.api.cmsBasePath).toBe('/api');
+    });
+
     it('should strip trailing slash from API_BASE_URL and API_BASE_PATH to avoid // collisions', () => {
       process.env.API_BASE_URL = 'http://localhost:8080/';
       process.env.API_BASE_PATH = '/api/v1/';
@@ -109,11 +115,18 @@ describe('config', () => {
       expect(config.api.basePath).toBe('/api/v1');
     });
 
+    it('should strip trailing slash from CMS_API_BASE_PATH to avoid // collisions', () => {
+      process.env.CMS_API_BASE_PATH = '/api/';
+      const config = createConfig();
+      expect(config.api.cmsBasePath).toBe('/api');
+    });
+
     it('should use default values for all optional variables', () => {
       delete process.env.REDIS_PORT;
       delete process.env.REDIS_PASSWORD;
       delete process.env.REDIS_DB;
       delete process.env.API_BASE_PATH;
+      delete process.env.CMS_API_BASE_PATH;
       delete process.env.API_TIMEOUT_MS;
       delete process.env.SESSION_TTL_SECONDS;
       delete process.env.REFRESH_THRESHOLD_SECONDS;
@@ -126,6 +139,7 @@ describe('config', () => {
       expect(config.redis.password).toBeUndefined();
       expect(config.redis.db).toBe(0);
       expect(config.api.basePath).toBe('/api/v1');
+      expect(config.api.cmsBasePath).toBe('/api');
       expect(config.api.timeoutMs).toBe(20_000);
       expect(config.session.ttlSeconds).toBe(28800);
       expect(config.session.refreshThresholdSeconds).toBe(180);

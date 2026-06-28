@@ -184,9 +184,11 @@ export async function DELETE(req, ctx) { return handleProxy(req, ctx) }
 
 | 輸入 | 結果 |
 |------|------|
-| Browser: `GET /api/players?cursor=abc&limit=20` | Upstream: `GET ${API_BASE_URL}${API_BASE_PATH}/players?cursor=abc&limit=20`（預設展開為 `${API_BASE_URL}/api/v1/players?...`） |
-| Browser: `POST /api/players/123/topup` | Upstream: `POST ${API_BASE_URL}${API_BASE_PATH}/players/123/topup` |
+| Browser: `GET /api/cms/players?cursor=abc&limit=20` | Upstream: `GET ${API_BASE_URL}${CMS_API_BASE_PATH}/cms/players?cursor=abc&limit=20`（預設展開為 `${API_BASE_URL}/api/cms/players?...`） |
+| Browser: `POST /api/cms/players/123/topups` | Upstream: `POST ${API_BASE_URL}${CMS_API_BASE_PATH}/cms/players/123/topups` |
 | Browser: `GET /api/?foo=bar`（空 path 段） | 400 `{error:"invalid_path"}` — 拒絕，不該發生 |
+
+> **為何 `[...path]` 使用 `CMS_API_BASE_PATH` 而非 `API_BASE_PATH`：** 後端 auth endpoints（`/auth/login` 等）在 `/api/v1`（有版本號），而 CMS 業務 endpoints 在 `/api`（無版本號）。`lib/auth/*.ts` 直接硬編 `/auth/...` 並使用 `API_BASE_PATH`；catch-all proxy 只轉發 CMS 請求，故使用獨立的 `CMS_API_BASE_PATH`（預設 `/api`）。兩者不可混用。
 
 - `params.path: string[]` 由 Next.js 解析，**不做** `decodeURIComponent`（catch-all 保持原樣，避免雙重 decode）
 - Query string **必須使用 `req.nextUrl.search`**（含開頭 `?` 的原始字串）直接拼接到 upstream URL，**禁止改用 `req.nextUrl.searchParams`**——後者會 percent-decode → re-encode、把 `+` 轉成空白，造成簽章類 / `application/x-www-form-urlencoded` query 失真。實作範例：`const upstreamUrl = ${apiBase}/${path.join('/')}${req.nextUrl.search}`
@@ -248,7 +250,8 @@ async function callUpstream(req: NextRequest, url: string) {
 | 413 | `payload_too_large` | request body > 1 MB | 安全 |
 | 502 | `upstream_failure` | upstream 網路錯誤、ECONNREFUSED 等 | **不可** include `cause.code` / stack；只給 `requestId` |
 | 504 | `upstream_timeout` | `AbortSignal.timeout` 觸發 | 安全 |
-| 透傳 | `<由 upstream 決定>` | upstream 回 4xx：body 直接透傳 | 由後端 ADR 004/005/006 控制；具體常見 codes 包含 `validation_error`、`invalid_input`、`unauthenticated`、`forbidden`、`use_logout_instead`、`username_taken`、`weak_password`、`token_expired`、`replay_detected` — 完整對應 [spec 02 §7](../specs/02-auth-session.md#7-錯誤處理) |
+| 401 `session_revoked` | `session_revoked`（後端原文轉發） | backend AuthMiddleware 命中黑名單 | BFF **主動刪除本地 Redis session**（防止後續請求繼續使用已廢 token）後，原樣回傳 401 body — 見下方「`session_revoked` 特殊處理」 |
+| 透傳 | `<由 upstream 決定>` | upstream 回其他 4xx：body 直接透傳 | 由後端 ADR 004/005/006 控制；具體常見 codes 包含 `validation_error`、`invalid_input`、`unauthenticated`、`forbidden`、`use_logout_instead`、`username_taken`、`weak_password`、`token_expired`、`replay_detected`、`session_revoked`（後端格式）— 完整對應 [spec 02 §7](../specs/02-auth-session.md#7-錯誤處理) |
 | —（無 status） | —（不寫 body） | `req.signal` abort：socket 已關閉 | 僅發 log/metric `upstream.client_closed`；handler throw 或 return 由 runtime 處理 |
 
 #### Authorization 注入規則
@@ -271,7 +274,7 @@ it('should export PUT / PATCH / DELETE handlers that forward to upstream')
 it('should return 405 for HEAD and OPTIONS (handlers not exported)')
 
 // URL 組合
-it('should append catch-all path to API_BASE_URL preserving slashes')
+it('should append catch-all path to API_BASE_URL using CMS_API_BASE_PATH (not API_BASE_PATH)')
 it('should forward original query string unchanged')
 it('should NOT re-encode query string parameters')
 it('should return 400 invalid_path when path segment is empty')
@@ -304,6 +307,8 @@ it('should not call upstream when body is invalid JSON for application/json POST
 it('should return 401 unauthenticated when getValidAccessToken returns null')
 it('should NOT call upstream when session is invalid')
 it('should set Authorization: Bearer <token> from session on upstream call')
+it('should delete BFF session and return 401 when backend returns 401 session_revoked')
+it('should NOT delete BFF session for other upstream 401 error codes (e.g. unauthenticated, forbidden)')
 
 // Timeout / cancellation
 it('should abort upstream fetch when AbortSignal.timeout(API_TIMEOUT_MS) fires')
@@ -329,7 +334,8 @@ it('should pass through upstream 4xx body unchanged')   // 後端 ADR 004 valida
 | `REDIS_PASSWORD` | ❌ | Redis 密碼；無密碼時留空 |
 | `REDIS_DB` | ❌ | Redis 資料庫索引，預設 `0` |
 | `API_BASE_URL` | ✅ | Go API Server 的 Base URL，**只到 host[:port]**，不含 path（例 `https://api.playerledger.com`、`http://localhost:8080`）。後端 OpenAPI `servers` 雖然寫 `http://localhost:8080/api/v1`，但 ops 端點（`/health`、`/health/ready`、`/metrics`）在 root 而非 `/api/v1` 下；分離為 `API_BASE_URL` + `API_BASE_PATH` 才能同時處理兩類路徑 |
-| `API_BASE_PATH` | ❌ | 業務 API path prefix，預設 `/api/v1`。**所有經 BFF proxy 的業務請求**（`/api/[...path]`）拼接為 `${API_BASE_URL}${API_BASE_PATH}/<path>`；ops 端點直接用 `${API_BASE_URL}/health` 等 |
+| `API_BASE_PATH` | ❌ | Auth endpoint path prefix，預設 `/api/v1`。僅供 `lib/auth/*.ts`（login / logout / refresh）使用，拼接為 `${API_BASE_URL}${API_BASE_PATH}/auth/<action>`；ops 端點直接用 `${API_BASE_URL}/health` |
+| `CMS_API_BASE_PATH` | ❌ | CMS 業務 endpoint path prefix，預設 `/api`（後端 CMS routes 無版本號）。`app/api/[...path]/route.ts` proxy 使用此值，拼接為 `${API_BASE_URL}${CMS_API_BASE_PATH}/<path>` |
 | `API_TIMEOUT_MS` | ❌ | 對上游 API Server 單次 `fetch` 的 hard timeout，預設 `20000`（20 秒，對齊 §12.1 API Gateway 29 秒上限的安全餘量）。**不可設定大於 25000**——超過會被 API Gateway 直接砍而非走 BFF 自己的 timeout 路徑 |
 | `CLIENT_ID` | ✅ | BFF 對應的後端 client policy 鍵值（如 `cms-web` / `public-web`）；login 時注入 request body 取得對應 refresh / absolute TTL，詳見後端 ADR 007。允許值由後端 `JWT_CLIENT_POLICIES` 定義。**必填**——由 ECS Task Definition 在每個環境明確指定，不在程式碼設預設值（避免 staging 誤用 cms-web 政策） |
 | `PUBLIC_ORIGIN` | ✅ | BFF 對外服務的完整 origin（含 scheme + hostname + port），例 `https://playerledger.com`。供 proxy.ts 的 Origin check 使用，詳見 [ADR 013](../adr/013-csrf-defense-strategy.md) |
@@ -417,7 +423,8 @@ export const config = {
   },
   api: {
     baseUrl:   required('API_BASE_URL').replace(/\/$/, ''),    // 強制去掉 trailing slash 避免雙 //
-    basePath:  (process.env.API_BASE_PATH ?? '/api/v1').replace(/\/$/, ''),  // 業務 API path prefix；ops 端點不用
+    basePath:    (process.env.API_BASE_PATH ?? '/api/v1').replace(/\/$/, ''),     // auth endpoint prefix（/api/v1）；ops 端點不用
+    cmsBasePath: (process.env.CMS_API_BASE_PATH ?? '/api').replace(/\/$/, ''),   // CMS 業務 endpoint prefix（/api，無版本號）
     clientId:  clientId('CLIENT_ID'),                          // 啟動時驗證屬於 OpenAPI ClientID enum，fail-fast
     timeoutMs: optionalInt('API_TIMEOUT_MS', 20_000, { min: 1_000, max: 25_000 }),
                                                                // 上界 25000：API Gateway 29 秒上限的安全餘量（§12.1）；超過會被 APIGW 直接砍
@@ -445,8 +452,10 @@ export const config = {
 | `lib/session/cookie.ts` | `config.session.ttlSeconds`、`config.session.cookieDomain`、`config.isProd` |
 | `lib/auth/login.ts` | `config.api.baseUrl`、`config.api.basePath`、`config.api.clientId`、`config.api.timeoutMs` |
 | `lib/auth/refresh.ts` | `config.api.baseUrl`、`config.api.basePath`、`config.api.timeoutMs` |
-| `lib/api-client/client.ts` | `config.api.baseUrl`、`config.api.basePath`、`config.api.timeoutMs` |
-| `app/api/health/deep/route.ts` | `config.api.baseUrl`（**不**加 basePath，因 ops 端點在 root） |
+| `lib/auth/logout.ts` | `config.api.baseUrl`、`config.api.basePath`、`config.api.timeoutMs` |
+| `lib/api-client/client.ts` | `config.api.baseUrl`、`config.api.cmsBasePath`、`config.api.timeoutMs` |
+| `app/api/[...path]/route.ts` | `config.api.baseUrl`、`config.api.cmsBasePath`、`config.api.timeoutMs` |
+| `app/api/health/deep/route.ts` | `config.api.baseUrl`（**不**加 basePath / cmsBasePath，因 ops 端點在 root） |
 | `proxy.ts` | `config.app.allowedOrigins` |
 
 ### 6.4 測試規格
@@ -458,7 +467,9 @@ it('should throw when API_BASE_URL is missing')
 it('should throw when CLIENT_ID is missing')           // 不提供 default，缺值即失敗（§5 註）
 it('should throw when CLIENT_ID is not in OpenAPI ClientID enum (e.g. "cms_web", "CMS-WEB")')
 it('should default API_BASE_PATH to /api/v1 when not set')
+it('should default CMS_API_BASE_PATH to /api when not set')
 it('should strip trailing slash from API_BASE_URL and API_BASE_PATH to avoid // collisions')
+it('should strip trailing slash from CMS_API_BASE_PATH to avoid // collisions')
 it('should throw when API_TIMEOUT_MS exceeds 25000 (API Gateway 29s margin)')
 it('should throw when API_TIMEOUT_MS is below 1000')
 it('should throw when PUBLIC_ORIGIN is missing')

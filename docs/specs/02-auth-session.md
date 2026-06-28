@@ -1723,7 +1723,8 @@ Origin check 對所有 state-changing 端點生效（含 `/api/login`、`/api/lo
 | 後端 family 已被其他裝置 `revoke-all` 撤銷 | refresh 收到 401 `session_not_found` → 刪除 session，清除 Cookie | `401 { error: "session_terminated" }` |
 | 登出時後端 `/auth/logout` 失敗（網路 / 401 / 5xx） | 忽略，繼續刪除 BFF session 和 Cookie；metric `auth.logout.upstream_failure` | `200 { }` |
 | 後端回傳 envelope 解析失敗（缺 `success` 或 `data` 欄位） | 視為 5xx 走 upstream 錯誤路徑；告警 metric `auth.envelope.parse_error` | `502 { error: "upstream_contract_violation" }` |
-| API Server 回傳 4xx（含 backend 標準 error envelope） | 原樣透傳（含 `request_id`） | 相同 status code + body |
+| 後端回傳 `401 session_revoked`（AuthMiddleware 命中黑名單） | **BFF 主動刪除本地 Redis session**（`deleteSession(sid)`）後原樣回傳 401 body；log `auth.proxy.session_revoked` | `401 { error: "session_revoked" }` |
+| API Server 回傳其他 4xx（含 backend 標準 error envelope） | 原樣透傳（含 `request_id`） | 相同 status code + body |
 | API Server 回傳 5xx | 原樣轉發；BFF 不加工 body | 相同 status code |
 | `revoke-session` 嘗試撤銷自己當前 family（後端 400 `use_logout_instead`） | UI 應改呼叫 `/api/logout`；BFF 不特別處理，原樣透傳 | `400 { error: "use_logout_instead" }` |
 | Register 失敗 `409 username_taken` | 原樣透傳 | `409 { error: "username_taken" }` |

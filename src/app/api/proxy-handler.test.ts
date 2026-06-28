@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
-import { DELETE } from './[...path]/route';
-import { getValidAccessToken } from '@/lib/session/session';
+import { DELETE, GET } from './[...path]/route';
+import { getValidAccessToken, deleteSession } from '@/lib/session/session';
 
 vi.mock('@/lib/logger/logger', () => ({
   logger: {
@@ -19,6 +19,7 @@ vi.mock('@/lib/logger/logger', () => ({
 vi.mock('@/lib/session/session', () => ({
   getValidAccessToken: vi.fn(),
   verifySession: vi.fn(),
+  deleteSession: vi.fn(),
 }));
 
 vi.mock('@/lib/observability/metrics', () => ({
@@ -30,6 +31,7 @@ vi.mock('@/lib/config', () => ({
     api: {
       baseUrl: 'http://upstream.test',
       basePath: '/v1',
+      cmsBasePath: '/api',
       timeoutMs: 5000,
     },
   },
@@ -294,9 +296,26 @@ describe('BFF Proxy Handler - PUT / PATCH / DELETE', () => {
 });
 
 describe('URL Assembly', () => {
-  it('should assemble URL as ${API_BASE_URL}${API_BASE_PATH}/[...path]${query}', () => {
-    // 测试 URL 拼接
-    expect(true).toBe(true);
+  it('should assemble URL using cmsBasePath (not basePath) — spec 01 §4.2', async () => {
+    vi.mocked(getValidAccessToken).mockResolvedValue('token-abc' as never);
+    const fetchSpy = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const req = new NextRequest(
+      new Request('http://localhost/api/cms/players?limit=20', {
+        method: 'GET',
+        headers: { cookie: '__Host-sid=abc' },
+      })
+    );
+    const ctx = { params: Promise.resolve({ path: ['cms', 'players'] }) };
+    await GET(req, ctx);
+
+    const [calledUrl] = fetchSpy.mock.calls[0];
+    // Must use cmsBasePath (/api), NOT basePath (/v1)
+    expect(calledUrl).toContain('/api/cms/players');
+    expect(calledUrl).not.toContain('/v1/cms/players');
+
+    vi.unstubAllGlobals();
   });
 
   it('should handle query parameters correctly', () => {
@@ -312,5 +331,67 @@ describe('URL Assembly', () => {
   it('should preserve URL encoding in path and query', () => {
     // 测试编码保留
     expect(true).toBe(true);
+  });
+});
+
+describe('session_revoked handling', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should delete BFF session and return 401 when backend returns 401 session_revoked', async () => {
+    vi.mocked(getValidAccessToken).mockResolvedValue('token-abc' as never);
+    vi.mocked(deleteSession).mockResolvedValue(undefined as never);
+    const fetchSpy = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ success: false, error: 'session_revoked', request_id: 'rid' }),
+        {
+          status: 401,
+          headers: { 'content-type': 'application/json' },
+        }
+      )
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+
+    // 測試環境 config.isProd=undefined(falsy) → SESSION_COOKIE_NAME='sid'
+    const req = new NextRequest(
+      new Request('http://localhost/api/cms/players', {
+        method: 'GET',
+        headers: { cookie: 'sid=test-sid' },
+      })
+    );
+    const ctx = { params: Promise.resolve({ path: ['cms', 'players'] }) };
+    const response = await GET(req, ctx);
+
+    expect(response.status).toBe(401);
+    expect(vi.mocked(deleteSession)).toHaveBeenCalledWith('test-sid');
+
+    vi.unstubAllGlobals();
+  });
+
+  it('should NOT delete BFF session for other upstream 401 error codes', async () => {
+    vi.mocked(getValidAccessToken).mockResolvedValue('token-abc' as never);
+    vi.mocked(deleteSession).mockResolvedValue(undefined as never);
+    const fetchSpy = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ success: false, error: 'forbidden', request_id: 'rid' }), {
+        status: 401,
+        headers: { 'content-type': 'application/json' },
+      })
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const req = new NextRequest(
+      new Request('http://localhost/api/cms/players', {
+        method: 'GET',
+        headers: { cookie: 'sid=test-sid' },
+      })
+    );
+    const ctx = { params: Promise.resolve({ path: ['cms', 'players'] }) };
+    const response = await GET(req, ctx);
+
+    expect(response.status).toBe(401);
+    expect(vi.mocked(deleteSession)).not.toHaveBeenCalled();
+
+    vi.unstubAllGlobals();
   });
 });

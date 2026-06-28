@@ -31,20 +31,16 @@ afterEach(() => {
 });
 
 function mockFetchOk(status = 201) {
-  return vi
-    .spyOn(globalThis, 'fetch')
-    .mockResolvedValue(new Response(null, { status }));
+  return vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status }));
 }
 
 function mockFetchError(status: number, body: object) {
-  return vi
-    .spyOn(globalThis, 'fetch')
-    .mockResolvedValue(
-      new Response(JSON.stringify(body), {
-        status,
-        headers: { 'content-type': 'application/json' },
-      })
-    );
+  return vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { 'content-type': 'application/json' },
+    })
+  );
 }
 
 describe('RegisterPage', () => {
@@ -197,9 +193,7 @@ describe('RegisterPage', () => {
     await user.type(screen.getByLabelText('確認密碼'), 'password123');
     await user.click(screen.getByRole('button', { name: '建立帳號' }));
 
-    await waitFor(() =>
-      expect(replaceMock).toHaveBeenCalledWith('/login?registered=true')
-    );
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith('/login?registered=true'));
   });
 
   it('should redirect to /login?registered=true on 201 response', async () => {
@@ -212,9 +206,7 @@ describe('RegisterPage', () => {
     await user.type(screen.getByLabelText('確認密碼'), 'password123');
     await user.click(screen.getByRole('button', { name: '建立帳號' }));
 
-    await waitFor(() =>
-      expect(replaceMock).toHaveBeenCalledWith('/login?registered=true')
-    );
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith('/login?registered=true'));
   });
 
   // 錯誤

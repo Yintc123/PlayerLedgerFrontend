@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getValidAccessToken } from '@/lib/session/session';
+import { getValidAccessToken, deleteSession } from '@/lib/session/session';
 import { SESSION_COOKIE_NAME } from '@/lib/session/cookie';
 import { config } from '@/lib/config';
 import { getRequestLogger } from '@/lib/logger/logger';
@@ -78,8 +78,8 @@ async function handleProxy(req: NextRequest, ctx: { params: Promise<{ path: stri
       if (body === '') body = undefined;
     }
 
-    // 步驟 5: 組合 upstream URL
-    const upstreamUrl = `${config.api.baseUrl}${config.api.basePath}/${path.join('/')}${req.nextUrl.search}`;
+    // 步驟 5: 組合 upstream URL（CMS endpoints 使用 cmsBasePath=/api，無版本號；auth 用 basePath=/api/v1）
+    const upstreamUrl = `${config.api.baseUrl}${config.api.cmsBasePath}/${path.join('/')}${req.nextUrl.search}`;
 
     // 步驟 6: 準備 headers（白名單轉發）
     const upstreamHeaders = new Headers();
@@ -153,6 +153,25 @@ async function handleProxy(req: NextRequest, ctx: { params: Promise<{ path: stri
 
     // 步驟 8: 處理 response（header + body 轉發）
     const responseBody = await upstreamResponse.text();
+
+    // session_revoked：backend AuthMiddleware 命中黑名單 → 主動清除本地 session（spec 01 §4.2 / spec 02 §7）
+    if (upstreamResponse.status === 401) {
+      try {
+        const parsed = JSON.parse(responseBody) as { error?: string };
+        if (parsed.error === 'session_revoked') {
+          const sid = req.cookies.get(SESSION_COOKIE_NAME)?.value;
+          if (sid) {
+            await deleteSession(sid).catch(() => {});
+          }
+          reqLogger.warn(
+            { type: 'auth.proxy.session_revoked', requestId },
+            'Backend revoked access token; BFF session cleared'
+          );
+        }
+      } catch {
+        // body 非 JSON 時不影響透傳
+      }
+    }
 
     const responseHeaders = new Headers();
 

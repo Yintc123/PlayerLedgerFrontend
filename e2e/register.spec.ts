@@ -17,7 +17,9 @@ test.describe('Register Flow', () => {
     await expect(page.getByLabel('確認密碼')).toBeVisible();
   });
 
-  test('/register submit with mismatched confirm password → inline alert, no navigation', async ({ page }) => {
+  test('/register submit with mismatched confirm password → inline alert, no navigation', async ({
+    page,
+  }) => {
     await page.goto('/register');
 
     await page.getByLabel('帳號').fill('alice');
@@ -29,10 +31,10 @@ test.describe('Register Flow', () => {
     await expect(page).toHaveURL('/register');
   });
 
-  test('/register submit with valid input → /login?registered=true with success banner', async ({ page }) => {
-    await page.route('/api/register', (route) =>
-      route.fulfill({ status: 201, body: '' })
-    );
+  test('/register submit with valid input → /login?registered=true with success banner', async ({
+    page,
+  }) => {
+    await page.route('/api/register', (route) => route.fulfill({ status: 201, body: '' }));
 
     await page.goto('/register');
     await page.getByLabel('帳號').fill('newuser');
@@ -44,7 +46,9 @@ test.describe('Register Flow', () => {
     await expect(page.getByRole('alert')).toContainText('註冊成功，請以新帳號登入');
   });
 
-  test('/register submit with duplicate username → red alert with backend message', async ({ page }) => {
+  test('/register submit with duplicate username → red alert with backend message', async ({
+    page,
+  }) => {
     await page.route('/api/register', (route) =>
       route.fulfill({
         status: 409,
