@@ -14,30 +14,12 @@ export default defineConfig({
     video: 'retain-on-failure',
   },
 
+  // v1：CI 只裝 chromium（ci.yml `playwright install --with-deps chromium`）。
+  // 加 firefox / webkit / Mobile Safari 須同步擴充 CI install 與 runtime 預算。
   projects: [
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
-    },
-
-    {
-      name: 'firefox',
-      use: { ...devices['Desktop Firefox'] },
-    },
-
-    {
-      name: 'webkit',
-      use: { ...devices['Desktop Safari'] },
-    },
-
-    /* Test against mobile viewports. */
-    {
-      name: 'Mobile Chrome',
-      use: { ...devices['Pixel 5'] },
-    },
-    {
-      name: 'Mobile Safari',
-      use: { ...devices['iPhone 12'] },
     },
   ],
 
