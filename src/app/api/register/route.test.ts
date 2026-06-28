@@ -109,4 +109,71 @@ describe('POST /api/register (spec 02 §3.6)', () => {
 
     vi.unstubAllGlobals();
   });
+
+  // spec 12 §6.2 補強
+  it('should pass through 400 invalid_client body unchanged', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: 'invalid_client' }), {
+          status: 400,
+          headers: { 'content-type': 'application/json' },
+        })
+      )
+    );
+
+    const req = buildPost({ username: 'newbie', password: 'StrongPass123!' });
+    const res = await POST(req);
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe('invalid_client');
+
+    vi.unstubAllGlobals();
+  });
+
+  it('should pass through 422 weak_password body unchanged', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: 'weak_password' }), {
+          status: 422,
+          headers: { 'content-type': 'application/json' },
+        })
+      )
+    );
+
+    const req = buildPost({ username: 'newbie', password: 'abc' });
+    const res = await POST(req);
+
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body.error).toBe('weak_password');
+
+    vi.unstubAllGlobals();
+  });
+
+  it('should NOT pass through use_logout_instead (code does not apply to /auth/register)', async () => {
+    // use_logout_instead 只出現在 DELETE /auth/sessions/{fid}，/auth/register 不會回此 code
+    // 確保即使後端誤回，前端仍透傳而非誤判
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: 'use_logout_instead' }), {
+          status: 400,
+          headers: { 'content-type': 'application/json' },
+        })
+      )
+    );
+
+    const req = buildPost({ username: 'newbie', password: 'StrongPass123!' });
+    const res = await POST(req);
+
+    // BFF 應透傳，不做特殊處理
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe('use_logout_instead');
+
+    vi.unstubAllGlobals();
+  });
 });

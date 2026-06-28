@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
-import { DELETE } from './%5B...path%5D/route';
+import { DELETE } from './[...path]/route';
 import { getValidAccessToken } from '@/lib/session/session';
 
 vi.mock('@/lib/logger/logger', () => ({

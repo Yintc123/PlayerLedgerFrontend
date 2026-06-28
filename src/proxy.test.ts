@@ -54,6 +54,32 @@ describe('proxy.ts (ADR 013 + 007)', () => {
     } as never);
   });
 
+  // spec 12 §6.1：/register PUBLIC_PATHS
+  describe('/register route (spec 12 §3.1)', () => {
+    it('should allow unauthenticated GET /register (PUBLIC_PATHS)', async () => {
+      const req = buildRequest('http://localhost:3000/register', { method: 'GET' });
+      const result = await proxy(req);
+      expect(result.status).not.toBe(302);
+    });
+
+    it('should NOT redirect /register to /login', async () => {
+      const req = buildRequest('http://localhost:3000/register', { method: 'GET' });
+      const result = await proxy(req);
+      const location = result.headers.get('location');
+      // null means no redirect; or ensure it doesn't point to /login
+      expect(location == null || !location.includes('/login')).toBe(true);
+    });
+
+    it('should apply CSRF Origin check on POST /api/register (state-changing)', async () => {
+      const req = buildRequest('http://localhost:3000/api/register', {
+        method: 'POST',
+        headers: { origin: 'https://evil.com', 'content-type': 'application/json' },
+      });
+      const result = await proxy(req);
+      expect(result.status).toBe(403);
+    });
+  });
+
   describe('CSRF Origin check (ADR 013)', () => {
     it('should allow GET regardless of Origin', () => {
       // 安全方法不需要 CSRF 检查

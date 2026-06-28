@@ -1,9 +1,8 @@
 'use client';
 
 import { FormEvent, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { CheckCircle2, Loader2, Wallet } from 'lucide-react';
+import { Loader2, Wallet } from 'lucide-react';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -11,42 +10,65 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
-function safeRedirectTarget(raw: string | null): string {
-  if (!raw) return '/';
-  if (!raw.startsWith('/') || raw.startsWith('//')) return '/';
-  return raw;
+function normalizeErrorCode(s: string): string {
+  return s.replace(/\s+/g, '_').toLowerCase();
 }
 
-export default function LoginPage() {
-  const searchParams = useSearchParams();
-  const registered = searchParams.get('registered') === 'true';
+function mapErrorMessage(data: { error?: string; message?: string }): string {
+  const code = normalizeErrorCode(data.error ?? '');
+  switch (code) {
+    case 'username_taken':
+      return '此帳號已被使用，請換一個';
+    case 'weak_password':
+      return '密碼強度不足；需至少 8 字元且同時含字母與數字';
+    case 'invalid_client':
+      return '服務設定錯誤，請聯絡管理員';
+    case 'too_many_requests':
+      return '操作過於頻繁，請稍後再試';
+    case 'invalid_input':
+      return data.message ?? '輸入格式不正確';
+    default:
+      return data.message ?? '建立帳號失敗';
+  }
+}
+
+export default function RegisterPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
-    setLoading(true);
 
+    if (confirmPassword !== password) {
+      setError('密碼與確認密碼不一致');
+      return;
+    }
+
+    setLoading(true);
     try {
-      const response = await fetch('/api/login', {
+      const response = await fetch('/api/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
       });
 
-      if (!response.ok) {
-        const data = await response.json();
-        setError(data.message || data.error || '登入失敗');
+      if (response.ok) {
+        window.location.replace('/login?registered=true');
         return;
       }
 
-      const target = safeRedirectTarget(searchParams.get('redirect'));
-      window.location.replace(target);
+      const data = await response.json().catch(() => ({}));
+      if (response.status >= 500) {
+        setError('服務暫時無法使用，請稍後再試');
+      } else {
+        setError(mapErrorMessage(data));
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : '網路錯誤');
+      setError(err instanceof Error ? err.message || '網路錯誤' : '網路錯誤');
     } finally {
       setLoading(false);
     }
@@ -69,16 +91,10 @@ export default function LoginPage() {
             <Wallet className="size-6" aria-hidden="true" />
           </div>
           <CardTitle className="text-2xl font-semibold tracking-tight">PlayerLedger</CardTitle>
-          <CardDescription>登入後台以查詢玩家儲值紀錄</CardDescription>
+          <CardDescription>建立 CMS 帳號</CardDescription>
         </CardHeader>
 
         <CardContent>
-          {registered && (
-            <Alert className="mb-4">
-              <CheckCircle2 className="size-4" aria-hidden="true" />
-              <AlertDescription>註冊成功，請以新帳號登入</AlertDescription>
-            </Alert>
-          )}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="username">帳號</Label>
@@ -87,10 +103,12 @@ export default function LoginPage() {
                 name="username"
                 type="text"
                 autoComplete="username"
+                minLength={3}
+                maxLength={64}
+                required
+                disabled={loading}
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                disabled={loading}
-                required
               />
             </div>
 
@@ -100,11 +118,28 @@ export default function LoginPage() {
                 id="password"
                 name="password"
                 type="password"
-                autoComplete="current-password"
+                autoComplete="new-password"
+                minLength={8}
+                maxLength={256}
+                required
+                disabled={loading}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                disabled={loading}
+              />
+              <p className="text-muted-foreground mt-1.5 text-xs">至少 8 字元，需含字母與數字</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="confirmPassword">確認密碼</Label>
+              <Input
+                id="confirmPassword"
+                name="confirmPassword"
+                type="password"
+                autoComplete="new-password"
                 required
+                disabled={loading}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
               />
             </div>
 
@@ -118,26 +153,20 @@ export default function LoginPage() {
               {loading ? (
                 <>
                   <Loader2 className="animate-spin" aria-hidden="true" />
-                  登入中…
+                  建立中…
                 </>
               ) : (
-                '登入'
+                '建立帳號'
               )}
             </Button>
 
-            <div className="relative my-2 flex items-center">
-              <div className="flex-grow border-t border-muted" />
-              <span className="mx-3 text-xs text-muted-foreground">或</span>
-              <div className="flex-grow border-t border-muted" />
-            </div>
-
-            <div className="text-center text-sm text-muted-foreground">
-              還沒有帳號？
+            <div className="mt-4 text-center text-sm text-muted-foreground">
+              已有帳號？
               <Link
-                href="/register"
+                href="/login"
                 className="text-foreground font-medium underline-offset-4 hover:underline"
               >
-                建立 CMS 帳號
+                返回登入
               </Link>
             </div>
           </form>

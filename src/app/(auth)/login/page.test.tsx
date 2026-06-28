@@ -7,6 +7,14 @@ import '@testing-library/jest-dom/vitest';
 
 import LoginPage from './page';
 
+vi.mock('next/link', () => ({
+  default: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }) => (
+    <a href={href} {...props}>{children}</a>
+  ),
+}));
+
+import React from 'react';
+
 const searchParamsMock = {
   get: vi.fn<(key: string) => string | null>(),
 };
@@ -192,5 +200,36 @@ describe('LoginPage', () => {
     render(<LoginPage />);
     expect(screen.getByLabelText('帳號')).toBeRequired();
     expect(screen.getByLabelText('密碼')).toBeRequired();
+  });
+
+  // 註冊成功 banner（spec 13 §12.2）
+  it('should render the "註冊成功，請以新帳號登入" banner when URL has ?registered=true', () => {
+    searchParamsMock.get.mockImplementation((key) => (key === 'registered' ? 'true' : null));
+    render(<LoginPage />);
+    expect(screen.getByText('註冊成功，請以新帳號登入')).toBeInTheDocument();
+  });
+
+  it('should NOT render the banner when ?registered is absent', () => {
+    searchParamsMock.get.mockReturnValue(null);
+    render(<LoginPage />);
+    expect(screen.queryByText('註冊成功，請以新帳號登入')).not.toBeInTheDocument();
+  });
+
+  it('should NOT render the banner when ?registered=false', () => {
+    searchParamsMock.get.mockImplementation((key) => (key === 'registered' ? 'false' : null));
+    render(<LoginPage />);
+    expect(screen.queryByText('註冊成功，請以新帳號登入')).not.toBeInTheDocument();
+  });
+
+  // 註冊入口（spec 13 §12.2）
+  it('should render a link to /register at the bottom of the card', () => {
+    render(<LoginPage />);
+    const link = screen.getByRole('link', { name: /建立 CMS 帳號/ });
+    expect(link).toHaveAttribute('href', '/register');
+  });
+
+  it('should render the link with text "建立 CMS 帳號"', () => {
+    render(<LoginPage />);
+    expect(screen.getByRole('link', { name: /建立 CMS 帳號/ })).toBeInTheDocument();
   });
 });

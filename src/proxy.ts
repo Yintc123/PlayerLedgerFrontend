@@ -10,6 +10,7 @@ import { logger } from '@/lib/logger/logger';
 // 不需要 session 即可存取的公開路徑（exact match，避免前綴誤判，詳見 ADR 007）
 const PUBLIC_PATHS = new Set<string>([
   '/login',
+  '/register',     // spec 12 §3.1：UI route，不需 session
   '/api/login',
   '/api/logout',
   '/api/register', // §3.6 passthrough，無對應 UI，仍受 CSRF + rate limit 保護
