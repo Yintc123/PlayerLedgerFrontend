@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { CheckCircle2, Loader2, Wallet } from 'lucide-react';
@@ -17,7 +17,8 @@ function safeRedirectTarget(raw: string | null): string {
   return raw;
 }
 
-export default function LoginPage() {
+// useSearchParams() 必須在 <Suspense> 邊界內使用，否則 Next.js build 時 prerender 失敗
+function LoginForm() {
   const searchParams = useSearchParams();
   const registered = searchParams.get('registered') === 'true';
   const [username, setUsername] = useState('');
@@ -53,6 +54,91 @@ export default function LoginPage() {
   };
 
   return (
+    <Card className="relative w-full max-w-sm shadow-xl">
+      <CardHeader className="space-y-1 text-center">
+        <div className="bg-foreground text-background mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-xl">
+          <Wallet className="size-6" aria-hidden="true" />
+        </div>
+        <CardTitle className="text-2xl font-semibold tracking-tight">PlayerLedger</CardTitle>
+        <CardDescription>登入後台以查詢玩家儲值紀錄</CardDescription>
+      </CardHeader>
+
+      <CardContent>
+        {registered && (
+          <Alert className="mb-4">
+            <CheckCircle2 className="size-4" aria-hidden="true" />
+            <AlertDescription>註冊成功，請以新帳號登入</AlertDescription>
+          </Alert>
+        )}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="username">帳號</Label>
+            <Input
+              id="username"
+              name="username"
+              type="text"
+              autoComplete="username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              disabled={loading}
+              required
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="password">密碼</Label>
+            <Input
+              id="password"
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={loading}
+              required
+            />
+          </div>
+
+          {error && (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+
+          <Button type="submit" disabled={loading} className="w-full">
+            {loading ? (
+              <>
+                <Loader2 className="animate-spin" aria-hidden="true" />
+                登入中…
+              </>
+            ) : (
+              '登入'
+            )}
+          </Button>
+
+          <div className="relative my-2 flex items-center">
+            <div className="flex-grow border-t border-muted" />
+            <span className="mx-3 text-xs text-muted-foreground">或</span>
+            <div className="flex-grow border-t border-muted" />
+          </div>
+
+          <div className="text-center text-sm text-muted-foreground">
+            還沒有帳號？
+            <Link
+              href="/register"
+              className="text-foreground font-medium underline-offset-4 hover:underline"
+            >
+              建立 CMS 帳號
+            </Link>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+export default function LoginPage() {
+  return (
     <main className="relative grid min-h-screen place-items-center overflow-hidden bg-gradient-to-br from-slate-50 via-slate-100 to-slate-200 px-4 py-12">
       <div
         aria-hidden="true"
@@ -62,88 +148,9 @@ export default function LoginPage() {
         aria-hidden="true"
         className="pointer-events-none absolute -bottom-32 -left-32 h-96 w-96 rounded-full bg-fuchsia-200/30 blur-3xl"
       />
-
-      <Card className="relative w-full max-w-sm shadow-xl">
-        <CardHeader className="space-y-1 text-center">
-          <div className="bg-foreground text-background mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-xl">
-            <Wallet className="size-6" aria-hidden="true" />
-          </div>
-          <CardTitle className="text-2xl font-semibold tracking-tight">PlayerLedger</CardTitle>
-          <CardDescription>登入後台以查詢玩家儲值紀錄</CardDescription>
-        </CardHeader>
-
-        <CardContent>
-          {registered && (
-            <Alert className="mb-4">
-              <CheckCircle2 className="size-4" aria-hidden="true" />
-              <AlertDescription>註冊成功，請以新帳號登入</AlertDescription>
-            </Alert>
-          )}
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="username">帳號</Label>
-              <Input
-                id="username"
-                name="username"
-                type="text"
-                autoComplete="username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                disabled={loading}
-                required
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="password">密碼</Label>
-              <Input
-                id="password"
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                disabled={loading}
-                required
-              />
-            </div>
-
-            {error && (
-              <Alert variant="destructive">
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            )}
-
-            <Button type="submit" disabled={loading} className="w-full">
-              {loading ? (
-                <>
-                  <Loader2 className="animate-spin" aria-hidden="true" />
-                  登入中…
-                </>
-              ) : (
-                '登入'
-              )}
-            </Button>
-
-            <div className="relative my-2 flex items-center">
-              <div className="flex-grow border-t border-muted" />
-              <span className="mx-3 text-xs text-muted-foreground">或</span>
-              <div className="flex-grow border-t border-muted" />
-            </div>
-
-            <div className="text-center text-sm text-muted-foreground">
-              還沒有帳號？
-              <Link
-                href="/register"
-                className="text-foreground font-medium underline-offset-4 hover:underline"
-              >
-                建立 CMS 帳號
-              </Link>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
-
+      <Suspense>
+        <LoginForm />
+      </Suspense>
       <p className="text-muted-foreground absolute bottom-6 text-xs">© PlayerLedger · 內部後台</p>
     </main>
   );
