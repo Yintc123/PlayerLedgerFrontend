@@ -40,7 +40,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ap-southeast-2
 
       - name: Login to Amazon ECR
         id: ecr-login
@@ -93,7 +93,15 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ap-southeast-2
+
+      - name: Substitute placeholders in task definition
+        run: |
+          sed -i \
+            -e "s/ACCOUNT/${{ secrets.AWS_ACCOUNT_ID }}/g" \
+            -e "s/REGION/ap-southeast-2/g" \
+            -e "s/EC2_PRIVATE_IP/${{ vars.EC2_PRIVATE_IP }}/g" \
+            .aws/ecs-task-definition.json
 
       - name: Update ECS task definition
         id: task-def
@@ -107,13 +115,13 @@ jobs:
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: ${{ steps.task-def.outputs.task-definition }}
-          cluster: igs-staging
+          cluster: warmhearted-crocodile-18gqvo-jko-cluster
           service: frontend
           wait-for-service-stability: true
 
       - name: Verify staging health
         run: |
-          export STAGING_URL="${{ secrets.STAGING_URL }}"
+          export STAGING_URL="http://igs-frontend-alb-1031231573.ap-southeast-2.elb.amazonaws.com"
           for i in {1..5}; do
             if curl -sf "$STAGING_URL/api/health" > /dev/null; then
               echo "Staging health check passed"
@@ -138,7 +146,15 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ap-southeast-2
+
+      - name: Substitute placeholders in task definition
+        run: |
+          sed -i \
+            -e "s/ACCOUNT/${{ secrets.AWS_ACCOUNT_ID }}/g" \
+            -e "s/REGION/ap-southeast-2/g" \
+            -e "s/EC2_PRIVATE_IP/${{ vars.EC2_PRIVATE_IP }}/g" \
+            .aws/ecs-task-definition.json
 
       - name: Update ECS task definition
         id: task-def
@@ -152,13 +168,13 @@ jobs:
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: ${{ steps.task-def.outputs.task-definition }}
-          cluster: igs-production
+          cluster: ${{ vars.PRODUCTION_CLUSTER }}
           service: frontend
           wait-for-service-stability: true
 
       - name: Verify production health
         run: |
-          export PROD_URL="${{ secrets.PRODUCTION_URL }}"
+          export PROD_URL="${{ vars.PRODUCTION_URL }}"
           for i in {1..5}; do
             if curl -sf "$PROD_URL/api/health" > /dev/null; then
               echo "Production health check passed"
@@ -179,12 +195,12 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ap-southeast-2
 
       - name: Get previous task definition and rollback
         run: |
           PREVIOUS_TASK_DEF=$(aws ecs describe-services \
-            --cluster igs-production \
+            --cluster ${{ vars.PRODUCTION_CLUSTER }} \
             --services frontend \
             --query 'services[0].deployments[1].taskDefinition' \
             --output text)
@@ -195,7 +211,7 @@ jobs:
           fi
 
           aws ecs update-service \
-            --cluster igs-production \
+            --cluster ${{ vars.PRODUCTION_CLUSTER }} \
             --service frontend \
             --task-definition "$PREVIOUS_TASK_DEF"
 

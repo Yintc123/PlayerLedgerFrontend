@@ -1,0 +1,43 @@
+name: Bootstrap Task Definition
+
+# 一次性 workflow：替換 task def placeholder 並註冊 revision 1。
+# 用途：ECS service 還沒建立時，CD 無法跑（amazon-ecs-deploy-task-definition 要求 service 已存在）。
+# 本 workflow 透過 workflow_dispatch 手動觸發一次，把 revision 1 註冊好，
+# 之後就能在 Console 建 service 並指向 igs-frontend:1。
+# 第一次以後不會再用到（cd.yml 會自動處理後續 revisions）。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  register-task-def:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ap-southeast-2
+
+      - name: Substitute placeholders in task definition
+        run: |
+          sed -i \
+            -e "s/ACCOUNT/${{ secrets.AWS_ACCOUNT_ID }}/g" \
+            -e "s/REGION/ap-southeast-2/g" \
+            -e "s/EC2_PRIVATE_IP/${{ vars.EC2_PRIVATE_IP }}/g" \
+            -e "s|REGISTRY/igs_frontend:LATEST|${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.ap-southeast-2.amazonaws.com/igs_frontend:bootstrap|g" \
+            .aws/ecs-task-definition.json
+
+      - name: Register task definition
+        run: |
+          ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://.aws/ecs-task-definition.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+          echo "Registered: $ARN"
