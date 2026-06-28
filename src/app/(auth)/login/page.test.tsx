@@ -21,24 +21,19 @@ vi.mock('next/link', () => ({
 
 import React from 'react';
 
-const searchParamsMock = {
-  get: vi.fn<(key: string) => string | null>(),
-};
-
-vi.mock('next/navigation', () => ({
-  useSearchParams: () => searchParamsMock,
-}));
-
 const replaceMock = vi.fn();
 const originalLocation = window.location;
 
-beforeEach(() => {
-  searchParamsMock.get.mockReturnValue(null);
-  replaceMock.mockReset();
+function setLocation(search = '') {
   Object.defineProperty(window, 'location', {
     configurable: true,
-    value: { ...originalLocation, replace: replaceMock },
+    value: { ...originalLocation, replace: replaceMock, search },
   });
+}
+
+beforeEach(() => {
+  replaceMock.mockReset();
+  setLocation('');
 });
 
 afterEach(() => {
@@ -165,7 +160,7 @@ describe('LoginPage', () => {
 
   it('should redirect to the safe ?redirect= target after successful login', async () => {
     const user = userEvent.setup();
-    searchParamsMock.get.mockReturnValue('/players');
+    setLocation('?redirect=/players');
     mockFetchOk();
 
     render(<LoginPage />);
@@ -178,7 +173,7 @@ describe('LoginPage', () => {
 
   it('should reject protocol-relative redirect targets to prevent open-redirect', async () => {
     const user = userEvent.setup();
-    searchParamsMock.get.mockReturnValue('//evil.example.com/phish');
+    setLocation('?redirect=//evil.example.com/phish');
     mockFetchOk();
 
     render(<LoginPage />);
@@ -191,7 +186,7 @@ describe('LoginPage', () => {
 
   it('should reject absolute external redirect targets to prevent open-redirect', async () => {
     const user = userEvent.setup();
-    searchParamsMock.get.mockReturnValue('https://evil.example.com/phish');
+    setLocation('?redirect=https://evil.example.com/phish');
     mockFetchOk();
 
     render(<LoginPage />);
@@ -210,19 +205,18 @@ describe('LoginPage', () => {
 
   // 註冊成功 banner（spec 13 §12.2）
   it('should render the "註冊成功，請以新帳號登入" banner when URL has ?registered=true', () => {
-    searchParamsMock.get.mockImplementation((key) => (key === 'registered' ? 'true' : null));
+    setLocation('?registered=true');
     render(<LoginPage />);
     expect(screen.getByText('註冊成功，請以新帳號登入')).toBeInTheDocument();
   });
 
   it('should NOT render the banner when ?registered is absent', () => {
-    searchParamsMock.get.mockReturnValue(null);
     render(<LoginPage />);
     expect(screen.queryByText('註冊成功，請以新帳號登入')).not.toBeInTheDocument();
   });
 
   it('should NOT render the banner when ?registered=false', () => {
-    searchParamsMock.get.mockImplementation((key) => (key === 'registered' ? 'false' : null));
+    setLocation('?registered=false');
     render(<LoginPage />);
     expect(screen.queryByText('註冊成功，請以新帳號登入')).not.toBeInTheDocument();
   });

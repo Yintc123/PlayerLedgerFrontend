@@ -1,10 +1,6 @@
 'use client';
 
-// force-dynamic: useSearchParams() reads query string at request time; skip static prerender
-export const dynamic = 'force-dynamic';
-
-import { FormEvent, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { FormEvent, useState, useEffect } from 'react';
 import Link from 'next/link';
 import { CheckCircle2, Loader2, Wallet } from 'lucide-react';
 
@@ -20,14 +16,19 @@ function safeRedirectTarget(raw: string | null): string {
   return raw;
 }
 
-// useSearchParams() 必須在 <Suspense> 邊界內使用，否則 Next.js build 時 prerender 失敗
+// Read search params via useEffect (client mount) to avoid Next.js prerender error.
+// useSearchParams() requires <Suspense> which defers form from SSR HTML — hurts e2e tests.
 function LoginForm() {
-  const searchParams = useSearchParams();
-  const registered = searchParams.get('registered') === 'true';
+  const [registered, setRegistered] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setRegistered(params.get('registered') === 'true');
+  }, []);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -47,7 +48,8 @@ function LoginForm() {
         return;
       }
 
-      const target = safeRedirectTarget(searchParams.get('redirect'));
+      const params = new URLSearchParams(window.location.search);
+      const target = safeRedirectTarget(params.get('redirect'));
       window.location.replace(target);
     } catch (err) {
       setError(err instanceof Error ? err.message : '網路錯誤');
