@@ -13,7 +13,7 @@ on:
     branches: [main]
 
 env:
-  IMAGE_NAME: playerledger/frontend
+  IMAGE_NAME: igs_frontend
 
 # OIDC（spec 04 §5.2 + ADR 018）：不使用長期 AWS access key。
 permissions:
@@ -115,7 +115,7 @@ jobs:
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: ${{ steps.task-def.outputs.task-definition }}
-          cluster: playerledger-staging
+          cluster: igs-staging
           service: frontend
           wait-for-service-stability: true
 
@@ -159,7 +159,7 @@ jobs:
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: ${{ steps.task-def.outputs.task-definition }}
-          cluster: playerledger-production
+          cluster: igs-production
           service: frontend
           wait-for-service-stability: true
 
@@ -191,7 +191,7 @@ jobs:
       - name: Get previous task definition and rollback
         run: |
           PREVIOUS_TASK_DEF=$(aws ecs describe-services \
-            --cluster playerledger-production \
+            --cluster igs-production \
             --services frontend \
             --query 'services[0].deployments[1].taskDefinition' \
             --output text)
@@ -202,7 +202,7 @@ jobs:
           fi
 
           aws ecs update-service \
-            --cluster playerledger-production \
+            --cluster igs-production \
             --service frontend \
             --task-definition "$PREVIOUS_TASK_DEF"
 
