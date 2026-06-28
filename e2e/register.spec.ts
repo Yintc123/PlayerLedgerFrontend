@@ -12,9 +12,9 @@ test.describe('Register Flow', () => {
     await link.click();
 
     await expect(page).toHaveURL('/register');
-    await expect(page.getByLabelText('帳號')).toBeVisible();
-    await expect(page.getByLabelText('密碼')).toBeVisible();
-    await expect(page.getByLabelText('確認密碼')).toBeVisible();
+    await expect(page.getByLabel('帳號')).toBeVisible();
+    await expect(page.getByLabel('密碼')).toBeVisible();
+    await expect(page.getByLabel('確認密碼')).toBeVisible();
   });
 
   test('/register submit with mismatched confirm password → inline alert, no navigation', async ({ page }) => {
