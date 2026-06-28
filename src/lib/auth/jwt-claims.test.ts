@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readJwtClaims } from './jwt-claims';
+import { readJwtClaims, readAccessTokenClaims } from './jwt-claims';
 import { Buffer } from 'node:buffer';
 
 function makeJwt(payload: Record<string, unknown>): string {
@@ -54,5 +54,22 @@ describe('readJwtClaims (spec §11.1)', () => {
 
     expect(() => readJwtClaims(jwt)).not.toThrow();
     expect(readJwtClaims(jwt).abs_exp).toBe(absExp);
+  });
+});
+
+// spec §11.1 — access token sub claim = user_id（JWT RFC 7519）
+describe('readAccessTokenClaims', () => {
+  it('should read userId from access token sub claim', () => {
+    const jwt = makeJwt({ sub: 'user-abc', exp: 9999999, role: 'user' });
+    expect(readAccessTokenClaims(jwt).sub).toBe('user-abc');
+  });
+
+  it('should throw missing_sub_claim when sub is absent', () => {
+    const jwt = makeJwt({ exp: 9999999, role: 'user' });
+    expect(() => readAccessTokenClaims(jwt)).toThrow('missing_sub_claim');
+  });
+
+  it('should throw malformed_jwt for invalid JWT format', () => {
+    expect(() => readAccessTokenClaims('bad-token')).toThrow('malformed_jwt');
   });
 });

@@ -18,6 +18,7 @@ vi.mock('@/lib/session/session', () => ({
 
 vi.mock('@/lib/auth/jwt-claims', () => ({
   readJwtClaims: vi.fn(() => ({ abs_exp: Math.floor(Date.now() / 1000) + 86400 })),
+  readAccessTokenClaims: vi.fn(() => ({ sub: 'user-123' })),
 }));
 
 vi.mock('@/lib/logger/logger', () => ({
@@ -39,6 +40,7 @@ vi.mock('@/lib/session/redis', () => ({
   },
 }));
 
+// mock 對齊後端 TokenPair schema：無 user_id 欄位，userId 來自 access_token sub claim
 function mockSuccessfulBackendLogin() {
   vi.stubGlobal(
     'fetch',
@@ -48,8 +50,9 @@ function mockSuccessfulBackendLogin() {
           data: {
             access_token: 'access-tok',
             refresh_token: 'refresh-tok',
+            token_type: 'Bearer',
             expires_in: 900,
-            user_id: 'user-123',
+            refresh_expires_in: 2592000,
           },
         }),
         { status: 200, headers: { 'content-type': 'application/json' } }
@@ -98,9 +101,26 @@ describe('login (§5.1)', () => {
     expect(true).toBe(true);
   });
 
-  it('should return userId after successful login', () => {
-    // 测试返回值
-    expect(true).toBe(true);
+  it('should return userId after successful login', async () => {
+    mockSuccessfulBackendLogin();
+    const { readAccessTokenClaims } = await import('@/lib/auth/jwt-claims');
+    vi.mocked(readAccessTokenClaims).mockReturnValue({ sub: 'user-456' });
+
+    const result = await login({ username: 'alice', password: 'pass1234' });
+
+    expect(result.userId).toBe('user-456');
+    vi.unstubAllGlobals();
+  });
+
+  it('should extract userId from access token sub claim, not from response body', async () => {
+    mockSuccessfulBackendLogin();
+    const { readAccessTokenClaims } = await import('@/lib/auth/jwt-claims');
+    vi.mocked(readAccessTokenClaims).mockReturnValue({ sub: 'sub-from-jwt' });
+
+    const result = await login({ username: 'alice', password: 'pass1234' });
+
+    expect(result.userId).toBe('sub-from-jwt');
+    vi.unstubAllGlobals();
   });
 
   it('should throw InvalidCredentialsError when API returns 401 unauthorized', () => {

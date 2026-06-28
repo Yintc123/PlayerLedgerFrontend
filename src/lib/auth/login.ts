@@ -3,7 +3,7 @@ import { config } from '@/lib/config';
 import { logger } from '@/lib/logger/logger';
 import { storeSession, generateSessionId, type SessionData } from '@/lib/session/session';
 import { redis } from '@/lib/session/redis';
-import { readJwtClaims } from './jwt-claims';
+import { readJwtClaims, readAccessTokenClaims } from './jwt-claims';
 
 export type LoginCredentials = {
   username: string;
@@ -199,14 +199,29 @@ export async function login(
   const accessToken = tokenData.access_token;
   const refreshToken = tokenData.refresh_token;
   const expiresInSeconds = tokenData.expires_in;
-  const userId = tokenData.user_id;
 
-  if (!accessToken || !refreshToken || !expiresInSeconds || !userId) {
+  if (!accessToken || !refreshToken || !expiresInSeconds) {
     logger.error(
       { type: 'auth.login.invalid_response', requestId },
       'Backend returned invalid login response'
     );
     throw new LoginError('upstream_error', 'Backend returned invalid response');
+  }
+
+  // userId 從 access token sub claim 取出（RFC 7519；backend schema 無 user_id 欄位）
+  let userId: string;
+  try {
+    userId = readAccessTokenClaims(accessToken).sub;
+  } catch (err) {
+    logger.error(
+      {
+        type: 'auth.login.invalid_access_jwt',
+        error: err instanceof Error ? err.message : String(err),
+        requestId,
+      },
+      'Backend returned invalid access token JWT (upstream contract violation)'
+    );
+    throw new LoginError('upstream_error', 'Backend access token missing sub claim');
   }
 
   // 從 refresh token JWT 取出 abs_exp（spec §11.1 — malformed 視為後端契約異常 502）
