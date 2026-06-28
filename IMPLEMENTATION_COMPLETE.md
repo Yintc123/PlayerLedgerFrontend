@@ -1,4 +1,9 @@
-# PlayerLedger Frontend — 完整實現總結
+# PlayerLedger Frontend — 實現總結（spec 01–04）
+
+> ⚠️ **範圍說明（2026-06-29 更新）**：本文件**只記錄 spec 01–04** 的實作,不代表整個專案完成。
+> 專案共 13 份 spec;玩家領域(05/06/08–11)因後端尚未提供 `/players/*` 端點而**待實作**,
+> spec 07 僅核心(role decode)完成、spec 12/13(註冊)已完成。
+> **跨全部 13 份 spec 的權威狀態請見 [SPEC_COMPLIANCE.md](SPEC_COMPLIANCE.md)**——以該文件為準。
 
 本文檔記錄了根據規格書 (`docs/specs/01-bff-architecture.md`、`02-auth-session.md`、`03-observability.md`、`04-dockerfile-build.md`) 的完整實現。
 
@@ -365,6 +370,6 @@ docker-compose up         # 完整環境
 
 ---
 
-**實現日期**: 2026-06-28  
-**規格書版本**: 04 (Dockerfile & Build)  
-**TDD & SDD 合規**: 100%
+**實現日期**: 2026-06-28(spec 01–04 範圍)
+**規格書版本**: 01–04(全 13 份 spec 的整體狀態見 [SPEC_COMPLIANCE.md](SPEC_COMPLIANCE.md))
+**TDD & SDD 合規**: spec 01–04 範圍內 100%;玩家領域(05/06/08–11)待後端契約後實作

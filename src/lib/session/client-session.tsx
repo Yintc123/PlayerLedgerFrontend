@@ -1,9 +1,10 @@
 'use client';
 
 import { createContext, useContext } from 'react';
+import type { Role } from '@/lib/auth/decode-token';
 
 /**
- * Client Session Model（§2.5）
+ * Client Session Model（§2.5；role 由 spec 07 §3.3 擴充）
  * 不含 token，只含非敏感欄位供 UI 讀取
  */
 export type ClientSession = {
@@ -11,6 +12,7 @@ export type ClientSession = {
   clientId: string; // 'cms-web' 等
   absoluteExpiresAt: number; // ms，與 server 端相同欄位
   createdAt: number; // ms，本次 login 建立 sid 的時間
+  role: Role; // spec 07 §3.3；單一字串（**非**陣列）
 };
 
 const SessionContext = createContext<ClientSession | null>(null);

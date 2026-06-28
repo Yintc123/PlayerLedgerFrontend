@@ -24,8 +24,12 @@ export type AccessTokenClaims = {
 /**
  * 解析 JWT payload，不驗簽。
  * malformed JWT 或缺少 abs_exp → 拋 Error（login 流程應回 502）
+ *
+ * 共用低階解碼器：refresh token（readJwtClaims）、access token
+ * （readAccessTokenClaims、decode-token.ts 的 decodeAccessToken）皆重用此函式，
+ * 避免 base64url padding / 三段格式驗證邏輯重複。
  */
-function decodeJwtPayload(jwt: string): Record<string, unknown> {
+export function decodeJwtPayload(jwt: string): Record<string, unknown> {
   const parts = jwt.split('.');
   if (parts.length !== 3) throw new Error('malformed_jwt');
 

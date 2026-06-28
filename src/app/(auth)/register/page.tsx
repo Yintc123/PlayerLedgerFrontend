@@ -149,7 +149,7 @@ export default function RegisterPage() {
               </Alert>
             )}
 
-            <Button type="submit" disabled={loading} className="w-full">
+            <Button type="submit" disabled={loading} aria-busy={loading} className="w-full">
               {loading ? (
                 <>
                   <Loader2 className="animate-spin" aria-hidden="true" />

@@ -1,4 +1,6 @@
-# PlayerLedger Frontend - TDD 實作總結
+# PlayerLedger Frontend - TDD 實作總結（spec 01–04,舊版）
+
+> ⚠️ 本文件僅涵蓋 spec 01–04。全 13 份 spec 的權威狀態請見 [SPEC_COMPLIANCE.md](SPEC_COMPLIANCE.md)。
 
 ## 專案完成狀態
 

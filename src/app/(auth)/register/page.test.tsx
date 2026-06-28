@@ -161,6 +161,27 @@ describe('RegisterPage', () => {
     await waitFor(() => expect(replaceMock).toHaveBeenCalled());
   });
 
+  it('should set aria-busy="true" on the submit button while in flight (spec 13 §10)', async () => {
+    const user = userEvent.setup();
+    let resolve: (r: Response) => void = () => {};
+    vi.spyOn(globalThis, 'fetch').mockReturnValue(
+      new Promise<Response>((res) => {
+        resolve = res;
+      })
+    );
+
+    render(<RegisterPage />);
+    await user.type(screen.getByLabelText('帳號'), 'alice');
+    await user.type(screen.getByLabelText('密碼'), 'password123');
+    await user.type(screen.getByLabelText('確認密碼'), 'password123');
+    await user.click(screen.getByRole('button', { name: '建立帳號' }));
+
+    expect(screen.getByRole('button', { name: /建立中/ })).toHaveAttribute('aria-busy', 'true');
+
+    resolve(new Response(null, { status: 201 }));
+    await waitFor(() => expect(replaceMock).toHaveBeenCalled());
+  });
+
   it('should render "建立中…" with spinner during loading state', async () => {
     const user = userEvent.setup();
     let resolve: (r: Response) => void = () => {};
