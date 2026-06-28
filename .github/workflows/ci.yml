@@ -1,21 +1,26 @@
-name: CI
+name: CI/CD
 
 on:
   push:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-cd-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   NODE_VERSION: '22.x'
+  IMAGE_NAME: igs_frontend
 
-# v1 採極簡 4-job CI：typecheck / lint / test-unit / test-e2e（spec 01 §8）。
-# 已從 PR gate 移出：schema-check（待 OpenAPI 上線重啟）、audit-deps、audit-licenses、
-# build / image-scan（由 cd.yml 負責，避免 CI/CD 重複建 image）。
+permissions:
+  id-token: write
+  contents: read
+
+# CI: typecheck / lint / test-unit / test-e2e（spec 01 §8）
+# CD: build-image → deploy-staging（CI 全綠後自動接續，只在 main push / workflow_dispatch 觸發）
 # E2E webServer 使用 start:e2e（cp static → standalone 目錄後啟動 node standalone server），
 # 避免 next start + output:standalone 不相容問題（靜態 JS 不被正確提供，React 無法 hydrate）。
 jobs:
@@ -100,3 +105,109 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
+
+  # ────────────────────────────────────────────────────────────
+  # CD: 只在 main push / workflow_dispatch 觸發；PR 跟 develop 不部署
+  # ────────────────────────────────────────────────────────────
+  build-image:
+    name: Build & Push Image
+    needs: [typecheck, lint, test-unit, test-e2e]
+    if: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    outputs:
+      image-uri: ${{ steps.image.outputs.uri }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ap-southeast-2
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.ecr-login.outputs.registry }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-,value=${{ github.sha }}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push (with SBOM + provenance)
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          sbom: true
+          provenance: mode=max
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Set image URI
+        id: image
+        run: |
+          echo "uri=${{ steps.ecr-login.outputs.registry }}/${{ env.IMAGE_NAME }}:${{ github.sha }}" >> $GITHUB_OUTPUT
+
+  deploy-staging:
+    name: Deploy to Staging
+    needs: build-image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ap-southeast-2
+
+      - name: Substitute placeholders in task definition
+        run: |
+          sed -i \
+            -e "s/ACCOUNT/${{ secrets.AWS_ACCOUNT_ID }}/g" \
+            -e "s/REGION/ap-southeast-2/g" \
+            -e "s/EC2_PRIVATE_IP/${{ vars.EC2_PRIVATE_IP }}/g" \
+            .aws/ecs-task-definition.json
+
+      - name: Update ECS task definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: .aws/ecs-task-definition.json
+          container-name: frontend
+          image: ${{ needs.build-image.outputs.image-uri }}
+
+      - name: Deploy to ECS (Staging)
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          cluster: warmhearted-crocodile-18gqvo-jko-cluster
+          service: frontend
+          wait-for-service-stability: true
+
+      - name: Verify staging health
+        run: |
+          export STAGING_URL="http://igs-frontend-alb-1031231573.ap-southeast-2.elb.amazonaws.com"
+          for i in {1..5}; do
+            if curl -sf "$STAGING_URL/api/health" > /dev/null; then
+              echo "Staging health check passed"
+              exit 0
+            fi
+            echo "Attempt $i/5 waiting"
+            sleep 10
+          done
+          echo "Staging health check failed"
+          exit 1
