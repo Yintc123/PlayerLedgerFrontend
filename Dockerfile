@@ -42,6 +42,14 @@ ARG APP_VERSION=unknown
 ENV APP_VERSION=${APP_VERSION}
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# config.ts 在 module load 時 fail-fast 驗證必填 env（REDIS_HOST/API_BASE_URL/...）。
+# next build 收集 page data 會 import 到 config，故 build 階段需佔位值。
+# 這些只在 build 期有效，runtime 由 ECS task definition 的 env/secrets 覆蓋。
+ENV REDIS_HOST=localhost \
+    API_BASE_URL=http://localhost:8080 \
+    PUBLIC_ORIGIN=http://localhost:3000 \
+    CLIENT_ID=cms-web
+
 RUN npm run build
 
 # =============================================================================
