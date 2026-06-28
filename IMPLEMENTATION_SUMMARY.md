@@ -13,6 +13,7 @@
 ## 1. 已完成模組清單
 
 ### 1.1 Config Module (§6)
+
 - **檔案**: `src/lib/config.ts`, `src/lib/config.test.ts`
 - **測試**: 21 個 ✅
 - **功能**:
@@ -23,6 +24,7 @@
   - 型別安全的 config 物件導出
 
 ### 1.2 Logger Module (§2 Observability)
+
 - **檔案**: `src/lib/logger/logger.ts`, `src/lib/logger/redact-paths.ts`
 - **測試**: 8 個 ✅
 - **功能**:
@@ -33,6 +35,7 @@
   - HTTP logger with header removal
 
 ### 1.3 Health Check Module (§9)
+
 - **檔案**: `src/lib/health/checks.ts`, `src/lib/health/checks.test.ts`
 - **測試**: 20 個 ✅
 - **端點**:
@@ -44,6 +47,7 @@
   - 並行執行 + 防資訊洩漏
 
 ### 1.4 Session Module (§2)
+
 - **檔案**: `src/lib/session/session.ts`, `src/lib/session/session.test.ts`, `src/lib/session/cookie.ts`
 - **測試**: 12 個 ✅
 - **功能**:
@@ -58,6 +62,7 @@
     - 錯誤分類 (TokenRefreshError / UpstreamError)
 
 ### 1.5 Auth Module - Login (§3.1)
+
 - **檔案**: `src/lib/auth/login.ts`, `src/app/api/login/route.ts`
 - **功能**:
   - 身份驗證 (username + password)
@@ -67,6 +72,7 @@
   - 登入失敗計數回寫
 
 ### 1.6 Auth Module - Logout (§3.2)
+
 - **檔案**: `src/lib/auth/logout.ts`, `src/app/api/logout/route.ts`
 - **功能**:
   - 後端 logout 呼叫 (fail-safe)
@@ -74,6 +80,7 @@
   - Cookie 清除
 
 ### 1.7 Auth Module - Token Refresh (§3.4)
+
 - **檔案**: `src/lib/auth/refresh.ts`
 - **功能**:
   - `refreshTokens()` - 純 API 呼叫
@@ -82,6 +89,7 @@
   - Token pair 回應解析
 
 ### 1.8 Proxy Middleware (§4)
+
 - **檔案**: `src/proxy.ts`
 - **功能**:
   - CSRF Origin check (state-changing methods)
@@ -91,6 +99,7 @@
   - 路由保護（Next.js 16 matcher）
 
 ### 1.9 BFF Proxy Handler (§4.2-§4.3)
+
 - **檔案**: `src/app/api/[...path]/route.ts`
 - **功能**:
   - 請求轉發至上游 API Server
@@ -101,6 +110,7 @@
   - 錯誤回應統一格式
 
 ### 1.10 Client Session (§2.5)
+
 - **檔案**: `src/lib/session/client-session.tsx`
 - **功能**:
   - SessionProvider + useSession / useSessionOptional
@@ -108,6 +118,7 @@
   - React Context 管理
 
 ### 1.11 Protected Layout & Pages
+
 - **檔案**: `src/app/(cms)/layout.tsx`, `src/app/(cms)/dashboard/page.tsx`
 - **檔案**: `src/app/(auth)/login/page.tsx`
 - **功能**:
@@ -120,6 +131,7 @@
 ## 2. 規範遵守清單
 
 ### 架構 (01-bff-architecture.md)
+
 - ✅ §2: 層級職責明確（CDN / API Gateway / BFF / Session Store）
 - ✅ §4: 目錄結構與路由設計
 - ✅ §4.2: Proxy handler 轉發規則
@@ -130,6 +142,7 @@
 - ✅ §10: 安全 headers (HSTS / CSP / X-Content-Type-Options)
 
 ### 認證 (02-auth-session.md)
+
 - ✅ §2.1: SessionId 格式與驗證
 - ✅ §2.2: Session Store (Redis) TTL 規則
 - ✅ §2.3: Redis singleton HMR 安全
@@ -141,6 +154,7 @@
 - ✅ §4: proxy.ts 路由保護 + CSRF check
 
 ### 可觀測性 (03-observability.md)
+
 - ✅ §2.1: Pino logger 配置
 - ✅ §2.3: 必含欄位 (service.* / deployment.* / cloud.*)
 - ✅ §2.4: HTTP 請求/回應 log
@@ -151,15 +165,16 @@
 
 ## 3. TDD 測試覆蓋
 
-| 模組 | 單元 | 整合 | E2E | 總計 |
-|------|------|------|-----|------|
-| Config | 21 | 0 | 0 | 21 |
-| Logger | 8 | 0 | 0 | 8 |
-| Health | 20 | 0 | 0 | 20 |
-| Session | 12 | 0 | 0 | 12 |
+| 模組     | 單元   | 整合    | E2E     | 總計    |
+| -------- | ------ | ------- | ------- | ------- |
+| Config   | 21     | 0       | 0       | 21      |
+| Logger   | 8      | 0       | 0       | 8       |
+| Health   | 20     | 0       | 0       | 20      |
+| Session  | 12     | 0       | 0       | 12      |
 | **合計** | **59** | **TBD** | **TBD** | **59+** |
 
 **測試執行**:
+
 ```bash
 npm run test           # 單次執行：59 tests pass ✅
 npm run test:watch    # 監聽模式
@@ -171,18 +186,21 @@ npm run test:e2e      # E2E 測試（Playwright）
 ## 4. 待完成項目
 
 ### 高優先級
+
 1. **getValidAccessToken() 完整測試** - 目前為實現邏輯，需補測試
 2. **proxy.ts 測試** - CSRF check, session validation, rate limit
 3. **BFF Proxy Handler 測試** - header 轉發, error handling, timeout
 4. **E2E 測試** - 完整登入→API呼叫→登出流程 (Playwright)
 
 ### 中優先級
+
 5. **Client-side telemetry** - Web Vitals + error reporting (§6.1)
 6. **CSP 違規回報** - `/api/csp-report` endpoint
 7. **OpenTelemetry 初始化** - `instrumentation.ts` register
 8. **Rate limiting** - Redis 限流邏輯 (proxy.ts ADR 009)
 
 ### 低優先級
+
 9. **Dockerfile 與 build** - spec 04
 10. **GitHub Actions CI** - spec 01 §8
 11. **ECS Task Definition** - spec 01 §11
@@ -192,19 +210,23 @@ npm run test:e2e      # E2E 測試（Playwright）
 ## 5. 關鍵設計決策
 
 ### Redis Mutex (§3.4 Token Refresh)
+
 - **決策**: 使用 `SET NX EX` 搶鎖 + Lua CAS 更新
 - **原因**: 確保同一 session 同一時間只有一個 refresh 執行，防止 grace window 超時觸發 replay detection
 - **實現**: `refreshTokens()` 成功後用 Lua script 檢查 session 仍存在才更新
 
 ### Session 滑動過期
+
 - **決策**: 取 `min(SESSION_TTL_SECONDS, absoluteExpiresAt - now)`
 - **原因**: 平衡使用者活躍度與家族絕對上限，避免 session 無限延伸
 
 ### Account Lockout (§3.1)
+
 - **決策**: SHA256 username hash (前 8 byte) 作為 key，5 次失敗後 15 分鐘鎖定
 - **原因**: 防止暴力破解，同時避免洩漏實際 username
 
 ### Proxy Header 白名單 (§4.2)
+
 - **決策**: Browser → Upstream: 5 個允許；Upstream → Browser: 4 個允許
 - **原因**: 最小權限原則，防止意外洩漏敏感信息（auth / cookie / hop-by-hop）
 
@@ -264,6 +286,7 @@ src/
 ## 7. 驗證清單
 
 ### 代碼品質
+
 - ✅ TypeScript strict mode
 - ✅ ESLint (via `npm run lint`)
 - ✅ No console.log, 統一用 logger
@@ -271,6 +294,7 @@ src/
 - ✅ 無 circular dependencies
 
 ### 安全
+
 - ✅ HttpOnly Cookie (`__Host-sid`)
 - ✅ CSRF Origin check
 - ✅ Header 白名單
@@ -279,6 +303,7 @@ src/
 - ✅ Session fixation 防護
 
 ### 性能
+
 - ✅ Async Redis operations
 - ✅ Bounded polling (not infinite loops)
 - ✅ Parallel health checks
@@ -289,18 +314,21 @@ src/
 ## 8. 如何運行
 
 ### 開發模式
+
 ```bash
 npm run dev          # 啟動 Next.js dev server
 npm run test:watch   # 監聽測試模式
 ```
 
 ### 生產構建
+
 ```bash
 npm run build        # 編譯為生產版本
 npm run start        # 運行生產版本
 ```
 
 ### CI/CD
+
 ```bash
 npm run typecheck    # TypeScript 檢查
 npm run lint         # ESLint
@@ -357,7 +385,8 @@ NODE_ENV=development
 
 **開發者**: Claude Haiku 4.5  
 **開發方法**: TDD (Test-Driven Development) + SDD (Spec-Driven Development)  
-**遵循規範**: 
+**遵循規範**:
+
 - 01-bff-architecture.md
 - 02-auth-session.md
 - 03-observability.md

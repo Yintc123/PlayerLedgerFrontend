@@ -140,10 +140,12 @@ aws ecs update-service \
 ### CloudWatch Logs
 
 所有應用日誌會自動發送到 CloudWatch：
+
 - Log Group: `/ecs/playerledger-frontend`
 - Log Stream: `ecs/frontend/{task-id}`
 
 查詢錯誤：
+
 ```bash
 aws logs filter-log-events \
   --log-group-name /ecs/playerledger-frontend \
@@ -154,6 +156,7 @@ aws logs filter-log-events \
 ### CloudWatch Metrics
 
 應用發佈的指標：
+
 - `PlayerLedger/Frontend/http.request.count`
 - `PlayerLedger/Frontend/http.request.duration`
 - `PlayerLedger/Frontend/auth.login.attempts`
@@ -161,6 +164,7 @@ aws logs filter-log-events \
 - `PlayerLedger/Frontend/http.client.web_vitals`
 
 建立告警：
+
 ```bash
 aws cloudwatch put-metric-alarm \
   --alarm-name playerledger-frontend-errors \
@@ -189,6 +193,7 @@ aws cloudwatch put-metric-alarm \
 ### 容器無法啟動
 
 1. 檢查 environment secrets：
+
 ```bash
 aws ecs describe-task-definition \
   --task-definition playerledger-frontend:N \
@@ -196,6 +201,7 @@ aws ecs describe-task-definition \
 ```
 
 2. 查看容器日誌：
+
 ```bash
 aws logs tail /ecs/playerledger-frontend --follow
 ```
@@ -203,6 +209,7 @@ aws logs tail /ecs/playerledger-frontend --follow
 ### Redis 連線失敗
 
 檢查 Secrets Manager：
+
 ```bash
 aws secretsmanager get-secret-value --secret-id playerledger/redis-url
 ```

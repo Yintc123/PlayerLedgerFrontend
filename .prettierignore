@@ -7,3 +7,17 @@ build
 *.lock
 .env
 .env*.local
+
+# 專案文件——specs / ADRs 的表格與欄寬對齊由人類維護；
+# prettier 預設會 re-flow markdown 表格與段落，造成大量無語意 diff。
+docs/
+
+# Next.js 自動生成
+next-env.d.ts
+
+# TypeScript incremental build cache
+*.tsbuildinfo
+
+# Playwright artifacts
+playwright-report/
+test-results/

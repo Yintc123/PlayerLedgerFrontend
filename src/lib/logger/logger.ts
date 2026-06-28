@@ -1,26 +1,26 @@
-import pino from 'pino'
-import { trace } from '@opentelemetry/api'
-import { REDACT_PATHS, REDACT_REMOVE_PATHS } from './redact-paths'
+import pino from 'pino';
+import { trace } from '@opentelemetry/api';
+import { REDACT_PATHS, REDACT_REMOVE_PATHS } from './redact-paths';
 
 // ECS metadata —— ECS_CONTAINER_METADATA_URI_V4 由 ECS agent 自動注入（spec 03 §2.3）。
 // 背景非同步 fetch /task endpoint，拿到的 TaskARN / AvailabilityZone 透過 mixin 在每筆 log 帶上。
 // 本地 dev / 測試環境 URI undefined，欄位保持空物件。
-const ecsRuntimeFields: Record<string, string> = {}
+const ecsRuntimeFields: Record<string, string> = {};
 
 async function loadEcsMetadata(): Promise<void> {
-  const uri = process.env.ECS_CONTAINER_METADATA_URI_V4
-  if (!uri) return
+  const uri = process.env.ECS_CONTAINER_METADATA_URI_V4;
+  if (!uri) return;
   try {
-    const res = await fetch(`${uri}/task`)
-    if (!res.ok) return
-    const task = (await res.json()) as { TaskARN?: string; AvailabilityZone?: string }
-    if (task.TaskARN) ecsRuntimeFields['aws.ecs.task.arn'] = task.TaskARN
-    if (task.AvailabilityZone) ecsRuntimeFields['cloud.availability_zone'] = task.AvailabilityZone
+    const res = await fetch(`${uri}/task`);
+    if (!res.ok) return;
+    const task = (await res.json()) as { TaskARN?: string; AvailabilityZone?: string };
+    if (task.TaskARN) ecsRuntimeFields['aws.ecs.task.arn'] = task.TaskARN;
+    if (task.AvailabilityZone) ecsRuntimeFields['cloud.availability_zone'] = task.AvailabilityZone;
   } catch {
     // 取不到不影響啟動 — 對齊 dev 環境
   }
 }
-void loadEcsMetadata()
+void loadEcsMetadata();
 
 const baseFields: Record<string, string | undefined> = {
   'service.name': 'playerledger-frontend',
@@ -28,11 +28,11 @@ const baseFields: Record<string, string | undefined> = {
   'service.version': process.env.APP_VERSION ?? 'unknown',
   'deployment.environment': process.env.DEPLOY_ENV ?? process.env.NODE_ENV ?? 'unknown',
   'cloud.region': process.env.AWS_REGION,
-}
+};
 
 const cleanBase = Object.fromEntries(
-  Object.entries(baseFields).filter(([, v]) => v !== undefined),
-) as Record<string, string>
+  Object.entries(baseFields).filter(([, v]) => v !== undefined)
+) as Record<string, string>;
 
 /**
  * 非同步 destination：避免 pino 預設的 sync write 在熱路徑阻塞 event loop。
@@ -42,7 +42,7 @@ const cleanBase = Object.fromEntries(
 const destination = pino.destination({
   sync: process.env.NODE_ENV === 'test',
   minLength: 4096,
-})
+});
 
 export const logger = pino(
   {
@@ -55,11 +55,11 @@ export const logger = pino(
      * trace.getActiveSpan() 永遠回 undefined，fields 維持基底欄位。
      */
     mixin() {
-      const fields: Record<string, string> = { ...ecsRuntimeFields }
-      const span = trace.getActiveSpan()
-      if (!span) return fields
-      const ctx = span.spanContext()
-      return { ...fields, traceId: ctx.traceId, spanId: ctx.spanId }
+      const fields: Record<string, string> = { ...ecsRuntimeFields };
+      const span = trace.getActiveSpan();
+      if (!span) return fields;
+      const ctx = span.spanContext();
+      return { ...fields, traceId: ctx.traceId, spanId: ctx.spanId };
     },
     redact: {
       paths: REDACT_PATHS,
@@ -71,20 +71,20 @@ export const logger = pino(
       level: (label) => ({ level: label }),
     },
   },
-  destination,
-)
+  destination
+);
 
 // header 類 redaction 採 remove（連 placeholder 都不留，避免被 indexed）
 export const httpLogger = logger.child(
   {},
   {
     redact: { paths: REDACT_REMOVE_PATHS, remove: true },
-  },
-)
+  }
+);
 
 // 取得 per-request logger（自動帶 requestId）
 export function getRequestLogger(requestId: string) {
-  return logger.child({ requestId })
+  return logger.child({ requestId });
 }
 
 /**
@@ -95,11 +95,11 @@ export function flushLogger(): Promise<void> {
   return new Promise((resolve) => {
     if (destination.flushSync) {
       try {
-        destination.flushSync()
+        destination.flushSync();
       } catch {
         // sync flush 失敗時繼續走 async path
       }
     }
-    resolve()
-  })
+    resolve();
+  });
 }

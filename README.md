@@ -63,10 +63,10 @@ docker push <ECR_URI>:latest
              └─▶ ECS Fargate (Next.js container)
 ```
 
-| 層 | 服務 | 用途 |
-|----|------|------|
-| CDN | CloudFront | 靜態資源快取、HTTPS 終止 |
-| 入口 | API Gateway | 路由、按量計費 |
+| 層       | 服務        | 用途                     |
+| -------- | ----------- | ------------------------ |
+| CDN      | CloudFront  | 靜態資源快取、HTTPS 終止 |
+| 入口     | API Gateway | 路由、按量計費           |
 | 應用程式 | ECS Fargate | 執行 Next.js（SSR、ISR） |
 
 > **注意**：此為 Demo 專案，基於成本考量全環境統一使用 API Gateway + ECS。正式 Production 專案建議改用 ALB，可避免 29 秒逾時限制並支援 Streaming / WebSocket。詳見 [ADR 001](docs/adr/001-deployment-architecture.md)。

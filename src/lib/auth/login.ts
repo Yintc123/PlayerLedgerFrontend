@@ -1,36 +1,36 @@
-import { createHash } from 'node:crypto'
-import { config } from '@/lib/config'
-import { logger } from '@/lib/logger/logger'
-import { storeSession, generateSessionId, type SessionData } from '@/lib/session/session'
-import { redis } from '@/lib/session/redis'
-import { readJwtClaims } from './jwt-claims'
+import { createHash } from 'node:crypto';
+import { config } from '@/lib/config';
+import { logger } from '@/lib/logger/logger';
+import { storeSession, generateSessionId, type SessionData } from '@/lib/session/session';
+import { redis } from '@/lib/session/redis';
+import { readJwtClaims } from './jwt-claims';
 
 export type LoginCredentials = {
-  username: string
-  password: string
-}
+  username: string;
+  password: string;
+};
 
 export type LoginResponse = {
-  userId: string
-  sessionId: string
-  absoluteExpiresAt: number
-}
+  userId: string;
+  sessionId: string;
+  absoluteExpiresAt: number;
+};
 
 export class LoginError extends Error {
   constructor(
     public backendError: string,
     message: string,
-    public retryAfterSec?: number,
+    public retryAfterSec?: number
   ) {
-    super(message)
-    this.name = 'LoginError'
+    super(message);
+    this.name = 'LoginError';
   }
 }
 
 export class InvalidCredentialsError extends LoginError {
   constructor(backendError: string) {
-    super(backendError, 'Invalid username or password')
-    this.name = 'InvalidCredentialsError'
+    super(backendError, 'Invalid username or password');
+    this.name = 'InvalidCredentialsError';
   }
 }
 
@@ -39,41 +39,38 @@ export class InvalidCredentialsError extends LoginError {
 // DEL session:<incomingSid>，防 session fixation（§3.1 step 5 / §6.2）。
 export async function login(
   credentials: LoginCredentials,
-  incomingSid?: string,
+  incomingSid?: string
 ): Promise<LoginResponse> {
   // 1. 驗證 request body
   if (!credentials.username || credentials.username.length > 128) {
-    throw new LoginError('invalid_input', 'Username must be non-empty and ≤ 128 characters')
+    throw new LoginError('invalid_input', 'Username must be non-empty and ≤ 128 characters');
   }
 
   if (!credentials.password || credentials.password.length > 256) {
-    throw new LoginError('invalid_input', 'Password must be non-empty and ≤ 256 characters')
+    throw new LoginError('invalid_input', 'Password must be non-empty and ≤ 256 characters');
   }
 
   // 2. Account lockout check（§6.3）
-  const usernameHash = createHash('sha256')
-    .update(credentials.username)
-    .digest('hex')
-    .slice(0, 8)
+  const usernameHash = createHash('sha256').update(credentials.username).digest('hex').slice(0, 8);
 
-  const lockoutKey = `login:fail:${usernameHash}`
+  const lockoutKey = `login:fail:${usernameHash}`;
 
   // Redis 故障 → fail-closed 503（spec §3.1 / ADR 011）
-  let lockoutCount: string | null
+  let lockoutCount: string | null;
   try {
-    lockoutCount = await redis.get(lockoutKey)
+    lockoutCount = await redis.get(lockoutKey);
   } catch (err) {
     logger.error(
       { type: 'auth.login.redis_error', error: err instanceof Error ? err.message : String(err) },
-      'Redis failure during lockout check; fail-closed',
-    )
-    throw new LoginError('service_unavailable', 'Service temporarily unavailable')
+      'Redis failure during lockout check; fail-closed'
+    );
+    throw new LoginError('service_unavailable', 'Service temporarily unavailable');
   }
 
   if (lockoutCount && parseInt(lockoutCount, 10) >= 5) {
-    let ttl = 900
+    let ttl = 900;
     try {
-      ttl = await redis.ttl(lockoutKey)
+      ttl = await redis.ttl(lockoutKey);
     } catch {
       // TTL 查詢失敗不影響主流程，用預設值
     }
@@ -84,19 +81,23 @@ export async function login(
         lockoutCount,
         lockoutTtlSec: ttl,
       },
-      'Account locked after 5 failed attempts',
-    )
-    throw new LoginError('account_locked', 'Account locked due to too many failed login attempts', ttl)
+      'Account locked after 5 failed attempts'
+    );
+    throw new LoginError(
+      'account_locked',
+      'Account locked due to too many failed login attempts',
+      ttl
+    );
   }
 
   // 3. 呼叫後端 /auth/login
-  const url = `${config.api.baseUrl}${config.api.basePath}/auth/login`
-  const requestId = crypto.randomUUID()
+  const url = `${config.api.baseUrl}${config.api.basePath}/auth/login`;
+  const requestId = crypto.randomUUID();
 
-  let response: Response
+  let response: Response;
   try {
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), config.api.timeoutMs)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), config.api.timeoutMs);
 
     response = await fetch(url, {
       method: 'POST',
@@ -110,9 +111,9 @@ export async function login(
         client_id: config.api.clientId,
       }),
       signal: controller.signal,
-    })
+    });
 
-    clearTimeout(timeoutId)
+    clearTimeout(timeoutId);
   } catch (err) {
     logger.error(
       {
@@ -120,16 +121,13 @@ export async function login(
         error: err instanceof Error ? err.message : String(err),
         requestId,
       },
-      'Login network error',
-    )
-    throw new LoginError(
-      'upstream_error',
-      err instanceof Error ? err.message : 'Network error',
-    )
+      'Login network error'
+    );
+    throw new LoginError('upstream_error', err instanceof Error ? err.message : 'Network error');
   }
 
   // 解析回應
-  const body = await response.json()
+  const body = await response.json();
 
   // 失敗情況 1：401 (invalid credentials)
   if (response.status === 401) {
@@ -142,10 +140,10 @@ export async function login(
         redis.call('EXPIRE', KEYS[1], ARGV[1])
       end
       return v
-    `
-    let newCount = 1
+    `;
+    let newCount = 1;
     try {
-      newCount = (await redis.eval(luaIncrExpire, 1, lockoutKey, '900')) as number
+      newCount = (await redis.eval(luaIncrExpire, 1, lockoutKey, '900')) as number;
     } catch (err) {
       // Redis 寫入失敗時不阻斷 401 回應（讀路徑已 fail-closed），記 warn 供觀測
       logger.warn(
@@ -154,11 +152,11 @@ export async function login(
           error: err instanceof Error ? err.message : String(err),
           requestId,
         },
-        'Failed to increment lockout counter',
-      )
+        'Failed to increment lockout counter'
+      );
     }
 
-    const errorCode = body.error || 'invalid_credentials'
+    const errorCode = body.error || 'invalid_credentials';
     logger.warn(
       {
         type: 'auth.login.failure',
@@ -167,9 +165,9 @@ export async function login(
         lockoutCount: newCount,
         requestId,
       },
-      'Login failed: invalid credentials',
-    )
-    throw new InvalidCredentialsError(errorCode)
+      'Login failed: invalid credentials'
+    );
+    throw new InvalidCredentialsError(errorCode);
   }
 
   // 失敗情況 2：5xx
@@ -180,42 +178,42 @@ export async function login(
         status: response.status,
         requestId,
       },
-      'Login upstream error',
-    )
-    throw new LoginError('upstream_error', `Backend returned ${response.status}`)
+      'Login upstream error'
+    );
+    throw new LoginError('upstream_error', `Backend returned ${response.status}`);
   }
 
   // 成功登入清除計數
-  await redis.del(lockoutKey)
+  await redis.del(lockoutKey);
 
   // 4. 建立 session — 後端契約規定 envelope { success, request_id, data }（spec §7 / §8）
   if (!body.data || typeof body.data !== 'object') {
     logger.error(
       { type: 'auth.envelope.parse_error', requestId },
-      'Backend response missing envelope data field (upstream contract violation)',
-    )
-    throw new LoginError('envelope_missing_data', 'Backend response missing data field')
+      'Backend response missing envelope data field (upstream contract violation)'
+    );
+    throw new LoginError('envelope_missing_data', 'Backend response missing data field');
   }
 
-  const tokenData = body.data
-  const accessToken = tokenData.access_token
-  const refreshToken = tokenData.refresh_token
-  const expiresInSeconds = tokenData.expires_in
-  const userId = tokenData.user_id
+  const tokenData = body.data;
+  const accessToken = tokenData.access_token;
+  const refreshToken = tokenData.refresh_token;
+  const expiresInSeconds = tokenData.expires_in;
+  const userId = tokenData.user_id;
 
   if (!accessToken || !refreshToken || !expiresInSeconds || !userId) {
     logger.error(
       { type: 'auth.login.invalid_response', requestId },
-      'Backend returned invalid login response',
-    )
-    throw new LoginError('upstream_error', 'Backend returned invalid response')
+      'Backend returned invalid login response'
+    );
+    throw new LoginError('upstream_error', 'Backend returned invalid response');
   }
 
   // 從 refresh token JWT 取出 abs_exp（spec §11.1 — malformed 視為後端契約異常 502）
-  let absoluteExpiresAt: number
+  let absoluteExpiresAt: number;
   try {
-    const claims = readJwtClaims(refreshToken)
-    absoluteExpiresAt = claims.abs_exp * 1000  // unix seconds → ms
+    const claims = readJwtClaims(refreshToken);
+    absoluteExpiresAt = claims.abs_exp * 1000; // unix seconds → ms
   } catch (err) {
     logger.error(
       {
@@ -223,25 +221,29 @@ export async function login(
         error: err instanceof Error ? err.message : String(err),
         requestId,
       },
-      'Backend returned invalid refresh token JWT (upstream contract violation)',
-    )
-    throw new LoginError('upstream_error', 'Backend refresh token missing abs_exp claim')
+      'Backend returned invalid refresh token JWT (upstream contract violation)'
+    );
+    throw new LoginError('upstream_error', 'Backend refresh token missing abs_exp claim');
   }
 
   // Session fixation 防護（§3.1 step 5）：先 best-effort 刪除 incoming sid，再產生新 sid。
   // 不論 incomingSid 格式合法與否都刪 — 攻擊者可能預植任意值。
   if (incomingSid) {
     try {
-      await redis.del(`session:${incomingSid}`)
+      await redis.del(`session:${incomingSid}`);
     } catch (err) {
       logger.warn(
-        { type: 'auth.login.fixation_cleanup_failed', error: err instanceof Error ? err.message : String(err), requestId },
-        'Failed to clear pre-existing session; continuing with new sid',
-      )
+        {
+          type: 'auth.login.fixation_cleanup_failed',
+          error: err instanceof Error ? err.message : String(err),
+          requestId,
+        },
+        'Failed to clear pre-existing session; continuing with new sid'
+      );
     }
   }
 
-  const sessionId = generateSessionId()
+  const sessionId = generateSessionId();
 
   // 建立 session data
   const session: SessionData = {
@@ -252,10 +254,10 @@ export async function login(
     expiresAt: Date.now() + expiresInSeconds * 1000,
     absoluteExpiresAt,
     createdAt: Date.now(),
-  }
+  };
 
   // 存儲到 Redis
-  await storeSession(sessionId, session)
+  await storeSession(sessionId, session);
 
   logger.info(
     {
@@ -265,13 +267,13 @@ export async function login(
       absoluteExpiresAt,
       requestId,
     },
-    'User logged in successfully',
-  )
+    'User logged in successfully'
+  );
 
   // 5. 回傳
   return {
     userId,
     sessionId,
     absoluteExpiresAt,
-  }
+  };
 }

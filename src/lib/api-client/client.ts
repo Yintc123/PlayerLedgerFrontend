@@ -10,8 +10,8 @@
 
 type ApiClientOptions = RequestInit & {
   /** 逾時毫秒數，預設 20000ms */
-  timeoutMs?: number
-}
+  timeoutMs?: number;
+};
 
 /**
  * fetch wrapper：自動注入 W3C trace context
@@ -20,35 +20,35 @@ type ApiClientOptions = RequestInit & {
  * @param init fetch options
  */
 export async function apiFetch(url: string, init: ApiClientOptions = {}): Promise<Response> {
-  const { timeoutMs = 20000, ...fetchInit } = init
-  const headers = new Headers(fetchInit.headers)
+  const { timeoutMs = 20000, ...fetchInit } = init;
+  const headers = new Headers(fetchInit.headers);
 
   // W3C Trace Context propagation（spec 03 §4.6）
   // 若 OTel SDK 已初始化，propagation.inject() 會注入 traceparent / tracestate
   // 若 SDK 未初始化（OTEL_SDK_DISABLED=true 或本地開發），則 context 為空，inject 為 no-op
   if (process.env.OTEL_SDK_DISABLED !== 'true') {
     try {
-      const { context, propagation } = await import('@opentelemetry/api')
+      const { context, propagation } = await import('@opentelemetry/api');
       propagation.inject(context.active(), headers, {
         set: (carrier: Headers, key: string, value: string) => carrier.set(key, value),
-      })
+      });
     } catch {
       // OTel 套件不存在時略過（本地 dev 未安裝）
     }
   }
 
-  const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     return await fetch(url, {
       ...fetchInit,
       headers,
       signal: AbortSignal.any(
-        [controller.signal, fetchInit.signal].filter(Boolean) as AbortSignal[],
+        [controller.signal, fetchInit.signal].filter(Boolean) as AbortSignal[]
       ),
-    })
+    });
   } finally {
-    clearTimeout(timeoutId)
+    clearTimeout(timeoutId);
   }
 }

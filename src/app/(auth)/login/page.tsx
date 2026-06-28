@@ -1,60 +1,54 @@
-'use client'
+'use client';
 
-import { FormEvent, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
-import { Loader2, Wallet } from 'lucide-react'
+import { FormEvent, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { Loader2, Wallet } from 'lucide-react';
 
-import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Button } from '@/components/ui/button'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 function safeRedirectTarget(raw: string | null): string {
-  if (!raw) return '/'
-  if (!raw.startsWith('/') || raw.startsWith('//')) return '/'
-  return raw
+  if (!raw) return '/';
+  if (!raw.startsWith('/') || raw.startsWith('//')) return '/';
+  return raw;
 }
 
 export default function LoginPage() {
-  const searchParams = useSearchParams()
-  const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
+  const searchParams = useSearchParams();
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault()
-    setError(null)
-    setLoading(true)
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
 
     try {
       const response = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
-      })
+      });
 
       if (!response.ok) {
-        const data = await response.json()
-        setError(data.message || data.error || '登入失敗')
-        return
+        const data = await response.json();
+        setError(data.message || data.error || '登入失敗');
+        return;
       }
 
-      const target = safeRedirectTarget(searchParams.get('redirect'))
-      window.location.replace(target)
+      const target = safeRedirectTarget(searchParams.get('redirect'));
+      window.location.replace(target);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '網路錯誤')
+      setError(err instanceof Error ? err.message : '網路錯誤');
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   return (
     <main className="relative grid min-h-screen place-items-center overflow-hidden bg-gradient-to-br from-slate-50 via-slate-100 to-slate-200 px-4 py-12">
@@ -72,9 +66,7 @@ export default function LoginPage() {
           <div className="bg-foreground text-background mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-xl">
             <Wallet className="size-6" aria-hidden="true" />
           </div>
-          <CardTitle className="text-2xl font-semibold tracking-tight">
-            PlayerLedger
-          </CardTitle>
+          <CardTitle className="text-2xl font-semibold tracking-tight">PlayerLedger</CardTitle>
           <CardDescription>登入後台以查詢玩家儲值紀錄</CardDescription>
         </CardHeader>
 
@@ -128,9 +120,7 @@ export default function LoginPage() {
         </CardContent>
       </Card>
 
-      <p className="text-muted-foreground absolute bottom-6 text-xs">
-        © PlayerLedger · 內部後台
-      </p>
+      <p className="text-muted-foreground absolute bottom-6 text-xs">© PlayerLedger · 內部後台</p>
     </main>
-  )
+  );
 }

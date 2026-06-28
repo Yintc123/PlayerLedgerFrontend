@@ -33,11 +33,11 @@
 
 ### 測試分層
 
-| 層級 | 工具 | 涵蓋範圍 |
-|------|------|---------|
-| Unit | Vitest | 工具函式、hooks、純邏輯 |
-| Component | React Testing Library | UI 元件互動行為 |
-| E2E | Playwright | 關鍵使用者流程 |
+| 層級      | 工具                  | 涵蓋範圍                |
+| --------- | --------------------- | ----------------------- |
+| Unit      | Vitest                | 工具函式、hooks、純邏輯 |
+| Component | React Testing Library | UI 元件互動行為         |
+| E2E       | Playwright            | 關鍵使用者流程          |
 
 ### 執行測試
 

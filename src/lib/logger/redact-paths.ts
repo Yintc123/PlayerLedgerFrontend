@@ -39,7 +39,7 @@ export const REDACT_PATHS = [
   '*.body.password',
   '*.body.email',
   '*.requestBody',
-]
+];
 
 // Remove path 用於 header，連 placeholder 都不留
 export const REDACT_REMOVE_PATHS = [
@@ -49,4 +49,4 @@ export const REDACT_REMOVE_PATHS = [
   'headers["proxy-authorization"]',
   'headers.Cookie',
   'headers.Authorization',
-]
+];

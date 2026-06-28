@@ -1,12 +1,12 @@
-import { redis } from '@/lib/session/redis'
-import { logger } from '@/lib/logger/logger'
+import { redis } from '@/lib/session/redis';
+import { logger } from '@/lib/logger/logger';
 
 export type RateLimitResult = {
-  allowed: boolean
-  remaining: number
-  resetAt: number
-  retryAfterSeconds?: number
-}
+  allowed: boolean;
+  remaining: number;
+  resetAt: number;
+  retryAfterSeconds?: number;
+};
 
 /**
  * Rate limiting 實現（ADR 009）
@@ -20,7 +20,7 @@ export type RateLimitResult = {
 export async function checkLimit(
   key: string,
   limit: number,
-  windowSeconds: number = 60,
+  windowSeconds: number = 60
 ): Promise<RateLimitResult> {
   try {
     // 使用 Lua script 原子操作：
@@ -37,23 +37,26 @@ export async function checkLimit(
         ttl = ARGV[1]
       end
       return {current, ttl}
-    `
+    `;
 
-    const result = await redis.eval(luaScript, 1, key, windowSeconds) as [number, number]
-    const [current, ttl] = result
-    const remaining = Math.max(0, limit - current)
-    const resetAt = Date.now() + (ttl * 1000)
+    const result = (await redis.eval(luaScript, 1, key, windowSeconds)) as [number, number];
+    const [current, ttl] = result;
+    const remaining = Math.max(0, limit - current);
+    const resetAt = Date.now() + ttl * 1000;
 
-    const allowed = current <= limit
+    const allowed = current <= limit;
 
     if (!allowed) {
-      logger.warn({
-        type: 'ratelimit.hit',
-        key,
-        current,
-        limit,
-        ttl,
-      }, 'Rate limit exceeded')
+      logger.warn(
+        {
+          type: 'ratelimit.hit',
+          key,
+          current,
+          limit,
+          ttl,
+        },
+        'Rate limit exceeded'
+      );
     }
 
     return {
@@ -61,14 +64,17 @@ export async function checkLimit(
       remaining,
       resetAt,
       retryAfterSeconds: allowed ? undefined : ttl,
-    }
+    };
   } catch (err) {
-    logger.error({
-      type: 'ratelimit.error',
-      error: err instanceof Error ? err.message : String(err),
-      key,
-    }, 'Rate limit check failed')
-    throw err
+    logger.error(
+      {
+        type: 'ratelimit.error',
+        error: err instanceof Error ? err.message : String(err),
+        key,
+      },
+      'Rate limit check failed'
+    );
+    throw err;
   }
 }
 
@@ -88,6 +94,6 @@ export function tooManyRequests(result: RateLimitResult) {
         'Content-Type': 'application/json',
         'Retry-After': String(result.retryAfterSeconds || 60),
       },
-    },
-  )
+    }
+  );
 }
