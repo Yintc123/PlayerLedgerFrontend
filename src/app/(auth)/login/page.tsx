@@ -2,8 +2,20 @@
 
 import { FormEvent, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
+import { Loader2, Wallet } from 'lucide-react'
 
-// 限制 redirect 必須是本站相對路徑，避免 open-redirect。
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+
 function safeRedirectTarget(raw: string | null): string {
   if (!raw) return '/'
   if (!raw.startsWith('/') || raw.startsWith('//')) return '/'
@@ -31,57 +43,94 @@ export default function LoginPage() {
 
       if (!response.ok) {
         const data = await response.json()
-        setError(data.message || data.error || 'Login failed')
+        setError(data.message || data.error || '登入失敗')
         return
       }
 
-      // 登入成功，導回 ?redirect= 或預設根路徑（§3.1 step 8）
       const target = safeRedirectTarget(searchParams.get('redirect'))
       window.location.replace(target)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Network error')
+      setError(err instanceof Error ? err.message : '網路錯誤')
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <div style={{ maxWidth: '400px', margin: '100px auto' }}>
-      <h1>PlayerLedger Login</h1>
+    <main className="relative grid min-h-screen place-items-center overflow-hidden bg-gradient-to-br from-slate-50 via-slate-100 to-slate-200 px-4 py-12">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -top-32 -right-32 h-96 w-96 rounded-full bg-indigo-200/40 blur-3xl"
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -bottom-32 -left-32 h-96 w-96 rounded-full bg-fuchsia-200/30 blur-3xl"
+      />
 
-      <form onSubmit={handleSubmit}>
-        <div style={{ marginBottom: '15px' }}>
-          <label>Username:</label>
-          <input
-            type="text"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            disabled={loading}
-            required
-          />
-        </div>
-
-        <div style={{ marginBottom: '15px' }}>
-          <label>Password:</label>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            disabled={loading}
-            required
-          />
-        </div>
-
-        {error && (
-          <div style={{ color: 'red', marginBottom: '15px' }}>
-            {error}
+      <Card className="relative w-full max-w-sm shadow-xl">
+        <CardHeader className="space-y-1 text-center">
+          <div className="bg-foreground text-background mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-xl">
+            <Wallet className="size-6" aria-hidden="true" />
           </div>
-        )}
+          <CardTitle className="text-2xl font-semibold tracking-tight">
+            PlayerLedger
+          </CardTitle>
+          <CardDescription>登入後台以查詢玩家儲值紀錄</CardDescription>
+        </CardHeader>
 
-        <button type="submit" disabled={loading}>
-          {loading ? 'Logging in...' : 'Login'}
-        </button>
-      </form>
-    </div>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="username">帳號</Label>
+              <Input
+                id="username"
+                name="username"
+                type="text"
+                autoComplete="username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                disabled={loading}
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="password">密碼</Label>
+              <Input
+                id="password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={loading}
+                required
+              />
+            </div>
+
+            {error && (
+              <Alert variant="destructive">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+
+            <Button type="submit" disabled={loading} className="w-full">
+              {loading ? (
+                <>
+                  <Loader2 className="animate-spin" aria-hidden="true" />
+                  登入中…
+                </>
+              ) : (
+                '登入'
+              )}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <p className="text-muted-foreground absolute bottom-6 text-xs">
+        © PlayerLedger · 內部後台
+      </p>
+    </main>
   )
 }

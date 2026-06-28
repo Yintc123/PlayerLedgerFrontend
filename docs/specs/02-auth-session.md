@@ -330,6 +330,81 @@ Browser              Next.js BFF                    Redis         API Server
 >
 > 此模式為標準 BFF / SDK 行為（同 Auth0 SDK、Okta SDK、Microsoft Identity 等）。詳見 §11.1。
 
+#### 登入頁 UI 設計（v1）
+
+`/login` 路由的 client component（`app/(auth)/login/page.tsx`）視覺與互動規格。styling 堆疊與元件來源見 [ADR 021](../adr/021-tailwind-v4-shadcn-ui.md)。
+
+**版型**：居中卡片 + 漸層背景，桌機與行動裝置共用同一版型。
+
+```
+┌─────────────────────────────────────────────┐
+│        （bg-gradient slate-50 → 200）       │
+│        + 角落 indigo / fuchsia 光暈         │
+│                                              │
+│       ┌───────────────────────────┐          │
+│       │     ◆ Wallet icon         │          │
+│       │     PlayerLedger          │          │
+│       │     登入後台以查詢…       │          │
+│       │                            │          │
+│       │   帳號                     │          │
+│       │   [____________________]   │          │
+│       │                            │          │
+│       │   密碼                     │          │
+│       │   [____________________]   │          │
+│       │                            │          │
+│       │   [! 錯誤訊息 ]（如有）    │          │
+│       │                            │          │
+│       │   [        登入        ]   │          │
+│       └───────────────────────────┘          │
+│                                              │
+│        © PlayerLedger · 內部後台            │
+└─────────────────────────────────────────────┘
+```
+
+**元件對應**（皆來自 `src/components/ui/*`，遵循 [ADR 021](../adr/021-tailwind-v4-shadcn-ui.md) 元件規約）：
+
+| 區塊 | shadcn primitive |
+|------|------------------|
+| 卡片外殼 | `Card` / `CardHeader` / `CardTitle` / `CardDescription` / `CardContent` |
+| 帳號 / 密碼欄位 | `Input` + `Label`（`htmlFor` 對應 input `id`） |
+| 提交按鈕 | `Button`（`variant="default"`、`className="w-full"`） |
+| 錯誤訊息 | `Alert variant="destructive"` + `AlertDescription` |
+| logo / loading icon | `lucide-react` 的 `Wallet` / `Loader2`（後者 `className="animate-spin"`） |
+
+**文案 token（繁中，鎖定不可換）**：
+
+| 用途 | 文字 |
+|------|------|
+| 卡片標題 | `PlayerLedger` |
+| 卡片副標 | `登入後台以查詢玩家儲值紀錄` |
+| 帳號 label | `帳號` |
+| 密碼 label | `密碼` |
+| 提交按鈕（閒置） | `登入` |
+| 提交按鈕（loading） | `登入中…`（U+2026 ellipsis） |
+| Footer | `© PlayerLedger · 內部後台` |
+| Fallback 錯誤（fetch 失敗無 message 時） | `登入失敗` |
+| Fallback 網路錯誤 | `網路錯誤` |
+
+**表單行為**：
+
+1. `<input>` 套 `autoComplete="username"` / `"current-password"`，配合瀏覽器密碼管理員。
+2. 兩個 input 皆 `required`；交由 HTML constraint 攔截全空提交，BFF 不需另接「全空」case。
+3. Loading 期間：兩個 input 與 submit button 全 `disabled`；按鈕文字切「登入中…」並前置 `Loader2` 動畫圖示（圖示 `aria-hidden`）。
+4. 後端回非 2xx：把 `data.message || data.error || '登入失敗'` 寫入 `Alert`（`role="alert"`）；不清空欄位，方便使用者修正再送。
+5. `fetch` 自身 reject（網路斷線）：顯示 `err.message || '網路錯誤'`，同樣走 Alert。
+6. 後端 200：以 `safeRedirectTarget(?redirect=...)` 取目的，呼叫 `window.location.replace(target)`；safeRedirectTarget 規則：必須 `/` 開頭且不可為 `//...`（protocol-relative），否則 fallback `/`，防 open-redirect。
+7. **不**自己處理 CSRF token：cookie `SameSite=Lax` + `Origin` check 由 BFF 把關（[§6.1](#61-csrf-防護)），UI 層不需動。
+8. **不**廣播 BroadcastChannel：步驟 8 的 `postLogin()` 廣播由 v1 共識「v1 不做 SPA-style cross-tab login sync」延後實作；待 [§5.6](#56-多分頁協調) AuthChannel 落地後再回頭補（[§9 Component 測試](#component-測試react-testing-library)有 TODO 標註）。
+
+**安全 / 無障礙**：
+
+- HttpOnly cookie 由 BFF response 寫入；UI 端不可讀 / 寫 cookie，本頁無 `document.cookie` 操作。
+- 表單以 `<form onSubmit>` 提交、按鈕為 `<button type="submit">`，Enter 鍵自動觸發提交（不依賴 keydown handler）。
+- `<Label htmlFor>` 對應 `<input id>`，滿足 `getByLabelText` 與螢幕閱讀器語意。
+- `Alert` 預設 `role="alert"`，錯誤訊息出現時自動 announce。
+- 對比度由 shadcn OKLCH 色票兜底（前景／背景與 destructive 變體均 ≥ 4.5:1）。
+- Inter 字型（[ADR 021](../adr/021-tailwind-v4-shadcn-ui.md)）透過 `next/font/google` 提供，含 swap fallback 系統字。
+
 ### 3.2 登出流程
 
 ```
@@ -1911,12 +1986,31 @@ it('should read sid cookie via SESSION_COOKIE_NAME constant (not hardcoded "sid"
 ### Component 測試（React Testing Library）
 
 ```ts
-// app/(auth)/login/page.test.tsx
-it('should disable submit button while login is in progress')
-it('should show error message on invalid credentials')
-it('should show field-level errors from backend 400 invalid input details[]')   // 新增
-it('should redirect to dashboard on successful login')
-it('should redirect to original URL after login when redirect param exists')
+// app/(auth)/login/page.test.tsx  — v1 已實作，UI 細節見 §3.1 「登入頁 UI 設計」與 ADR 021
+// 測試環境：// @vitest-environment jsdom（per-file directive，不改全域 vitest config）
+
+// 表單渲染
+it('should render the username field, password field, and submit button')
+it('should require both username and password to submit (HTML validation)')
+
+// 提交行為
+it('should POST credentials to /api/login when the form is submitted')
+it('should disable both inputs and the submit button while the request is in flight')
+
+// 錯誤顯示
+it('should render an alert with the backend message when the API returns an error')
+it('should fall back to the error code when no message is provided')
+it('should render a network-error alert when fetch rejects')
+
+// Redirect 與 open-redirect 防護
+it('should redirect to "/" by default on successful login')
+it('should redirect to the safe ?redirect= target after successful login')
+it('should reject protocol-relative redirect targets to prevent open-redirect')
+it('should reject absolute external redirect targets to prevent open-redirect')
+
+// TODO（spec 列入但 v1 尚未實作；落地需後端契約與多分頁 AuthChannel 配套）
+it('should show field-level errors from backend 400 invalid_input details[]')
+it('should broadcast postLogin via AuthChannel before window.location.replace')   // 見 §3.1 步驟 8 與 §5.6
 ```
 
 ### Idle timer 純邏輯測試（Vitest + fakeTimers，**不需 jsdom**）
@@ -2183,4 +2277,5 @@ it('should handle missing base64 padding')
 - [ADR 011 - 邊緣安全強化（XFF 信賴 + login fail-closed）](../adr/011-edge-security-hardening.md)
 - [ADR 012 - 健康檢查端點 shallow / deep 分離](../adr/012-health-probe-scope.md)
 - [ADR 013 - CSRF 防護策略（SameSite=Lax + Origin Check）](../adr/013-csrf-defense-strategy.md)
+- [ADR 021 - 採用 Tailwind v4 + shadcn/ui 作為前端 styling 堆疊](../adr/021-tailwind-v4-shadcn-ui.md)
 - [後端 ADR 007 - Refresh Token Rotation 與重放偵測](../../PlayerLedgerBackend/docs/adr/007-refresh-token-rotation-and-replay-detection.md) ⚠️ 取代後端 ADR 002
