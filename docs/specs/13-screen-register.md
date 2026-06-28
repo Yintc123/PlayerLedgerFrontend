@@ -130,6 +130,91 @@ UI 元件全部沿用 `src/components/ui/{button,input,label,card,alert}.tsx`（
 | 返回登入連結 | `<Link href="/login">` + Tailwind utility（不需 Button variant） |
 | Logo / loading icon | `Wallet` / `Loader2` from lucide-react |
 
+### 4.4 視覺實作（共用 `(auth)` 設計系統 + register 差異）
+
+**共用部分**：外殼、漸層、光暈、Card、Header、Logo box、Wallet icon、Title、Description、form 結構、欄位包裝、Submit Button、Loader2、Footer——**完全沿用** [`02 §3.1 視覺實作`](./02-auth-session.md#登入頁-ui-設計v1) 的 Tailwind classes，無修改。
+
+**register-only 元素**（仅本頁需要加上的 Tailwind class）：
+
+| 區塊 | 角色 | Tailwind class | 備註 |
+|------|------|----------------|------|
+| 確認密碼欄位包裝 | 第 3 個 label-input 組 | `space-y-2` | 與帳號／密碼欄位相同；`<form>` 的 `space-y-4` 自動處理欄位間距 |
+| 密碼 helper text `<p>` | 揭示「字母+數字」規則 | `text-muted-foreground mt-1.5 text-xs` | `mt-1.5`（6px）緊貼 input、`text-xs`（12px）避免搶視覺重點 |
+| 返回登入容器 `<div>` | Submit 按鈕下方分隔 | `mt-4 text-center text-sm text-muted-foreground` | 與 form `space-y-4` 平齊；置中、`text-sm` 比 helper 略大、整體弱化 |
+| 返回登入 `<Link>` | 純文字內連結 | `text-foreground font-medium underline-offset-4 hover:underline` | 連結文字回到主前景色（與 muted 容器形成對比）、底線僅 hover 時顯示，避免靜態下視覺噪訊 |
+
+> **為何返回登入連結用 `<Link>` 而非 `Button variant="link"`**：語意是「導航到另一頁」非「觸發動作」；`<a>` 也讓鍵盤、SR、瀏覽器右鍵「在新分頁開啟」等行為原生支援。
+>
+> **為何不用 `Separator` shadcn 元件做「或」分隔**：register 頁只有一個 secondary CTA（返回登入），加分隔線會過度設計；`/login` 頁因要同時呈現「主要：登入」+「次要：建立帳號」才需要分隔線（[`02 §3.1`](./02-auth-session.md#登入頁-ui-設計v1) 「註冊入口」段）。
+
+**JSX 骨架**（示意，最終實作應同 `/login` 的 `'use client'` + `useState` 結構）：
+
+```tsx
+<main className="relative grid min-h-screen place-items-center overflow-hidden bg-gradient-to-br from-slate-50 via-slate-100 to-slate-200 px-4 py-12">
+  <div aria-hidden="true" className="pointer-events-none absolute -top-32 -right-32 h-96 w-96 rounded-full bg-indigo-200/40 blur-3xl" />
+  <div aria-hidden="true" className="pointer-events-none absolute -bottom-32 -left-32 h-96 w-96 rounded-full bg-fuchsia-200/30 blur-3xl" />
+
+  <Card className="relative w-full max-w-sm shadow-xl">
+    <CardHeader className="space-y-1 text-center">
+      <div className="bg-foreground text-background mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-xl">
+        <Wallet className="size-6" aria-hidden="true" />
+      </div>
+      <CardTitle className="text-2xl font-semibold tracking-tight">PlayerLedger</CardTitle>
+      <CardDescription>建立 CMS 帳號</CardDescription>
+    </CardHeader>
+
+    <CardContent>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="username">帳號</Label>
+          <Input id="username" name="username" type="text" autoComplete="username"
+                 minLength={3} maxLength={64} required disabled={loading}
+                 value={username} onChange={(e) => setUsername(e.target.value)} />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="password">密碼</Label>
+          <Input id="password" name="password" type="password" autoComplete="new-password"
+                 minLength={8} maxLength={256} required disabled={loading}
+                 value={password} onChange={(e) => setPassword(e.target.value)} />
+          <p className="text-muted-foreground mt-1.5 text-xs">
+            至少 8 字元，需含字母與數字
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="confirmPassword">確認密碼</Label>
+          <Input id="confirmPassword" name="confirmPassword" type="password" autoComplete="new-password"
+                 required disabled={loading}
+                 value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
+        </div>
+
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        <Button type="submit" disabled={loading} className="w-full">
+          {loading ? (<><Loader2 className="animate-spin" aria-hidden="true" />建立中…</>) : '建立帳號'}
+        </Button>
+
+        <div className="mt-4 text-center text-sm text-muted-foreground">
+          已有帳號？
+          <Link href="/login" className="text-foreground font-medium underline-offset-4 hover:underline">
+            返回登入
+          </Link>
+        </div>
+      </form>
+    </CardContent>
+  </Card>
+
+  <p className="text-muted-foreground absolute bottom-6 text-xs">© PlayerLedger · 內部後台</p>
+</main>
+```
+
+> JSX 為**規格示意**而非正規實作模板；實作仍須遵循 [CLAUDE.md TDD 流程](../../CLAUDE.md#規則)：先寫測試（[§12](#12-測試清單tdd)）→ 再寫實作 → 確認 [`02 §3.1 視覺實作`](./02-auth-session.md#登入頁-ui-設計v1) class 完全一致（避免兩頁不對稱）。
+
 ---
 
 ## 5. 表單欄位（UI 屬性）

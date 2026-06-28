@@ -371,6 +371,48 @@ Browser              Next.js BFF                    Redis         API Server
 | 錯誤訊息 | `Alert variant="destructive"` + `AlertDescription` |
 | logo / loading icon | `lucide-react` 的 `Wallet` / `Loader2`（後者 `className="animate-spin"`） |
 
+**視覺實作（Tailwind classes，`(auth)` 群共用設計系統）**：
+
+本表為 `/login` 已落地實作的 source of truth；`/register`（[`13`](./13-screen-register.md)）與未來 `(auth)` 群新增頁面**直接沿用**，僅文案／欄位不同。
+
+| 區塊 | 角色 | Tailwind class |
+|------|------|----------------|
+| `<main>` 外殼 | 全頁版型 + 漸層底 + 光暈 clip | `relative grid min-h-screen place-items-center overflow-hidden bg-gradient-to-br from-slate-50 via-slate-100 to-slate-200 px-4 py-12` |
+| 右上光暈 blob | `<div aria-hidden="true">` | `pointer-events-none absolute -top-32 -right-32 h-96 w-96 rounded-full bg-indigo-200/40 blur-3xl` |
+| 左下光暈 blob | `<div aria-hidden="true">` | `pointer-events-none absolute -bottom-32 -left-32 h-96 w-96 rounded-full bg-fuchsia-200/30 blur-3xl` |
+| `Card` 容器 | 居中卡片浮起 | `relative w-full max-w-sm shadow-xl` |
+| `CardHeader` | 標題區置中 | `space-y-1 text-center` |
+| Logo 方塊 | Wallet icon 包裝盒 | `bg-foreground text-background mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-xl` |
+| `Wallet` icon | 品牌圖示 | `size-6` |
+| `CardTitle` | 主標 | `text-2xl font-semibold tracking-tight` |
+| `CardDescription` | 副標 | 預設樣式（`text-muted-foreground text-sm`） |
+| `<form>` | 表單區 | `space-y-4` |
+| 欄位包裝（`<div>` wrap Label + Input） | label-input 一組 | `space-y-2` |
+| `Alert` 錯誤 | shadcn 預設 | 預設樣式（無額外 class） |
+| Submit `Button` | 全寬主按鈕 | `w-full` |
+| `Loader2` icon | loading 動畫 | `animate-spin` |
+| Footer `<p>` | 底部 © 標語 | `text-muted-foreground absolute bottom-6 text-xs` |
+
+> **設計意圖（why this class palette）**：
+>
+> - **slate 漸層 + indigo / fuchsia 光暈**：低飽和中性底 + 高彩光暈製造現代 SaaS 感（Vercel / Linear / Resend 同手法）；光暈用 `blur-3xl` + `/40` `/30` opacity 確保不搶卡片視覺焦點
+> - **`max-w-sm`（24rem = 384px）**：3 欄位以下的窄表單慣例；放寬到 `max-w-md` 會顯得空曠
+> - **`shadow-xl`**：與光暈 blob 共構景深，卡片明顯浮於背景；用 `shadow-2xl` 反而過重
+> - **Logo box `h-12 w-12`（48px）** + **icon `size-6`（24px）= 50% icon 比例**：黃金比例，icon 太大會撐爆框、太小則 box 顯多餘
+> - **`text-2xl font-semibold tracking-tight`**：title 在 24px + semibold 視覺重量適中；`tracking-tight` 縮緊字距讓品牌名「PlayerLedger」整體看起來更俐落
+> - **Footer 用 `absolute bottom-6`**：避免被表單高度影響——`/login`、`/register` 卡片高度不同，footer 仍貼底，整體節奏一致
+
+**響應式**：
+
+- `max-w-sm` 在最小 320px 手機仍 fit 良好（`px-4` 提供 16px 左右安全距離）
+- 光暈用 `-top-32 -right-32` 偏移 + `overflow-hidden` 在外殼，小螢幕不會撐出水平捲軸
+- v1 桌機與手機共用同一版型；不額外處理 tablet breakpoint
+
+**Dark mode**：v1 不啟用（[ADR 021](../adr/021-tailwind-v4-shadcn-ui.md)）。`slate` / `indigo` / `fuchsia` 為標準 Tailwind 調色盤，未來啟用 dark mode 時：
+- 漸層改 `dark:from-slate-900 dark:via-slate-800 dark:to-slate-700`
+- 光暈 opacity 調低（如 `dark:bg-indigo-500/20`）避免在深底太刺眼
+- Logo box `bg-foreground` 已用 CSS variable，自動適應
+
 **文案 token（繁中，鎖定不可換）**：
 
 | 用途 | 文字 |
