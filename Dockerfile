@@ -1,16 +1,12 @@
 # syntax=docker/dockerfile:1.7
 
 # =============================================================================
-# Base image：以 @sha256 digest 釘版（標籤是可變指標，會被同名 rebuild 覆蓋）
-# 初次安裝 / 升級 SOP：見 spec 04 §3.3.1
-# CI 應定期 dependabot 自動 PR；版本變化視同程式變更走完 CI/CD。
-#
-# REPLACE_WITH_PINNED_DIGEST 為佔位符——上線前必須替換為實際 digest：
+# Base image：PoC 階段先用 tag，production 前要改回 @sha256 digest 釘版（spec 04 §3.3.1）
+# 升級 digest SOP：
 #   docker pull node:22-alpine --platform linux/amd64
 #   docker inspect node:22-alpine --format '{{index .RepoDigests 0}}'
-# 然後把 sha256:xxx... 部分填回此處。CI 在 build 時若仍為 REPLACE_WITH_PINNED_DIGEST 須失敗。
 # =============================================================================
-ARG NODE_IMAGE=node:22-alpine@sha256:REPLACE_WITH_PINNED_DIGEST
+ARG NODE_IMAGE=node:22-alpine
 
 # =============================================================================
 # Stage 1: Dependencies
