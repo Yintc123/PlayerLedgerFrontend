@@ -201,8 +201,8 @@ src/app/(cms)/players/[playerId]/topups/
 
 ### 7.1 按鈕條件顯示
 
-- 僅 `roles.includes('finance')` 或 `roles.includes('admin')` 時渲染（[`07 §4`](./07-admin-rbac-audit.md)）
-- 用 `useSession()` 取 `roles`；client component
+- `session.role === 'viewer'` 時**不**渲染（[`07 §4.1`](./07-admin-rbac-audit.md)：admin / user 可匯出，viewer 不可）
+- 用 `useSession()` 取 `role`（單一字串，**非**陣列）；client component
 - 後端最終把關——按鈕渲染與否不是安全邊界
 
 ### 7.2 同步 vs async 分流
@@ -424,9 +424,9 @@ it('should expose aria-busy on click until route transition completes')
 
 ```ts
 // 條件顯示
-it('should NOT render when session.roles is only ["support"]')
-it('should render when session.roles includes "finance"')
-it('should render when session.roles includes "admin"')
+it('should NOT render when session.role is "viewer"')
+it('should render when session.role is "user"')
+it('should render when session.role is "admin"')
 
 // 同步流程
 it('should render as <a download> link when sync mode is chosen')
@@ -476,9 +476,9 @@ it('should emit topups.list.result_count metric on render')
 test('filter by date range + status returns matching records and URL reflects state')
 test('clicking Clear resets URL to /players/[id]/topups and shows default results')
 test('clicking a row navigates to /players/[id]/topups/[recordId]')
-test('finance role can sync-export CSV from first page')
-test('finance role can async-export after paginating; modal shows progress and download link')
-test('support role does not see Export button')
+test('user role can sync-export CSV from first page')
+test('admin role can async-export after paginating; modal shows progress and download link')
+test('viewer role does not see Export button')
 test('reload preserves filter state via URL')
 ```
 
