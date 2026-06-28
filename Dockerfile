@@ -37,6 +37,10 @@ RUN --mount=type=cache,target=/root/.npm \
 
 COPY . .
 
+# 確保 public/ 存在：專案目前無靜態資產，但 runner stage 會 COPY 此目錄。
+# Next.js 不會自動建立空 public/，缺少時 docker COPY 會失敗。
+RUN mkdir -p public
+
 # build 時注入版本資訊，讓 /api/health 可回傳 version
 ARG APP_VERSION=unknown
 ENV APP_VERSION=${APP_VERSION}
