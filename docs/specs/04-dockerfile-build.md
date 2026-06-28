@@ -41,7 +41,7 @@ const config: NextConfig = {
 
 # =============================================================================
 # Base image：以 @sha256 digest 釘版（標籤是可變指標，會被同名 rebuild 覆蓋）
-# 升級流程：執行 `docker pull node:22-alpine`，取 `RepoDigests` 更新此處。
+# 初次安裝 / 升級流程：見 §3.3.1「Base image SHA bootstrap」
 # CI 應定期 dependabot 自動 PR；版本變化視同程式變更走完 CI/CD。
 # =============================================================================
 ARG NODE_IMAGE=node:22-alpine@sha256:REPLACE_WITH_PINNED_DIGEST
@@ -123,8 +123,13 @@ EXPOSE 3000
 # CMD 為 shell 形式（無 JSON 陣列），${PORT} 會在 runtime 由 /bin/sh 展開，
 # 因此 ECS Task 改 PORT env 不會讓健康檢查靜默壞掉
 # 注意：ECS Target Group 同時做 L7 health check（spec 01 §9.4），這層是 docker 層保險
+#
+# 為何不用 `wget --spider`：busybox wget --spider 在 HTTP 4xx 仍 exit 0
+# （只在 transport 錯誤 / 5xx 失敗），路由失誤導致 /api/health 變 404 時假綠燈。
+# 改為下載 body 並 grep `"status":"ok"`，配合 BFF 端 §9.1 的 shape 一致。
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-    CMD wget -q --spider "http://127.0.0.1:${PORT}/api/health" || exit 1
+    CMD wget -q -O- "http://127.0.0.1:${PORT}/api/health" 2>/dev/null \
+        | grep -q '"status":"ok"' || exit 1
 
 # tini 處理 PID 1 行為：收割殭屍 + 轉送訊號（SIGTERM/SIGINT）給 Node.js
 # Node 收 SIGTERM 後須完成 in-flight 請求才退出，詳見 §3.6
@@ -148,6 +153,43 @@ BuildKit feature,讓 `/root/.npm` 在多次 build 間共享。**只在 CI 環境
 
 不用 cache 的話,每次 build 都重新下載所有 npm 套件,CI 慢 2-5 分鐘。
 
+### 3.3.1 Base image SHA bootstrap（初次 pin / 升級 SOP）
+
+Dockerfile 預設值 `node:22-alpine@sha256:REPLACE_WITH_PINNED_DIGEST` 是占位符，**直接 `docker build` 會失敗**——這是刻意的 fail-fast：未經審視的 base image 不得進 build。
+
+**第一次 pin 或升級流程**（任何人都可執行；CI dependabot 自動化此流程）：
+
+```bash
+# 1. 拉最新 tag
+docker pull node:22-alpine
+
+# 2. 取得本機 docker 看到的 manifest digest（不是 image ID，這是 registry-side digest）
+DIGEST=$(docker buildx imagetools inspect node:22-alpine \
+  --format '{{json .Manifest.Digest}}' | tr -d '"')
+
+# fallback（無 buildx）：
+# DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' node:22-alpine \
+#   | cut -d'@' -f2)
+
+# 3. 確認 digest 格式
+echo "$DIGEST" | grep -qE '^sha256:[a-f0-9]{64}$' || { echo "bad digest: $DIGEST"; exit 1; }
+
+# 4. 替換 Dockerfile 內的 placeholder（macOS sed 需 '' 跟在 -i 後）
+sed -i.bak "s|node:22-alpine@sha256:[a-zA-Z0-9_]*|node:22-alpine@${DIGEST}|" Dockerfile
+rm Dockerfile.bak
+
+# 5. 驗證 build 通過
+docker build --pull=false -t playerledger-frontend:bootstrap-check .
+
+# 6. 提交時 commit message 註明 base image 來源與時間
+git add Dockerfile
+git commit -m "chore(docker): pin node:22-alpine to ${DIGEST}"
+```
+
+**升級頻率**：dependabot 設定每週一次掃描 `docker` ecosystem，新 digest 自動開 PR；緊急 CVE 由人手動跑此流程。dependabot 設定範例見 [後端 infrastructure.md §23](../../PlayerLedgerBackend/docs/specs/infrastructure.md)。
+
+> **為何使用 placeholder 而非具體 digest**：spec 是模板，提交時 digest 必然過期；具體值留給 CI / 開發者執行 bootstrap 流程後寫入。
+
 ### 3.3 為何選 alpine 而非 distroless
 
 | 選項 | 大小 | 優點 | 缺點 |
@@ -166,7 +208,8 @@ BuildKit feature,讓 `/root/.npm` 在多次 build 間共享。**只在 CI 環境
 ### 3.4 為何用 busybox wget 而非 curl / node 做 HEALTHCHECK
 
 ```
-HEALTHCHECK CMD wget -q --spider "http://127.0.0.1:${PORT}/api/health" || exit 1
+HEALTHCHECK CMD wget -q -O- "http://127.0.0.1:${PORT}/api/health" 2>/dev/null \
+    | grep -q '"status":"ok"' || exit 1
 ```
 
 替代方案：
@@ -175,9 +218,12 @@ HEALTHCHECK CMD wget -q --spider "http://127.0.0.1:${PORT}/api/health" || exit 1
 |------|------|
 | `curl -f` | 需 `apk add curl`，增加 ~6MB image 與 libssl/libcrypto CVE 面；alpine busybox 已內建 wget，零成本 |
 | `node -e "fetch(...)"` | cold start ~100ms，每 30s 一次容易被 GC pause 干擾；額外 RSS 佔用 |
-| `wget -q --spider` | 0 額外套件、啟動 ~5ms、`--spider` 只看 status code 不下載 body |
+| `wget -q --spider`（**已淘汰**） | 同 0 套件、但 busybox 實作對 **HTTP 4xx 仍 exit 0**——一旦路由 regression 讓 `/api/health` 變 404，HEALTHCHECK 假報健康，ECS / Docker 不會替換 task。**禁用** |
+| `wget -q -O- + grep status:ok`（**採用**） | 多耗一次 body 解析（< 1ms），但能確認 body shape；對齊 spec 01 §9.1 的 health response `{"status":"ok",...}` |
 
 `127.0.0.1` 而非 `localhost` 是為了避免 musl libc DNS 解析行為差異（v6/v4 切換造成偶發逾時）。`${PORT}` 透過 shell 形式 CMD 在 runtime 展開，PORT env 修改不會讓健康檢查靜默失效。
+
+> **如果 `/api/health` 改 body shape**，HEALTHCHECK 的 grep pattern 必須同步調整；spec 01 §9.5 已有對應 contract 測試確保 shape 不漂移。
 
 ### 3.5 非 root 使用者的 UID 選擇
 
@@ -227,10 +273,11 @@ export async function register() {
 
 | 欄位 | 值 | 理由 |
 |------|-----|------|
-| `stopTimeout` | 30（秒）| Node.js 完成 in-flight + 釋放 Redis 的足夠緩衝；上限 120s |
+| `stopTimeout` | **60（秒）** | Node.js graceful shutdown 需處理：(a) 拒絕新連線 (b) 等待 in-flight SSR/proxy 完成（最壞 ≤ API Gateway 29s 上限 + BFF own timeout）(c) `pino.flushSync()` 寫出 log buffer (d) `redis.quit()` 收尾。30s 在尾端 28s 的請求 + Redis quit 會被 SIGKILL 截斷、in-flight 客戶收到 connection reset；60s 留 ~25s buffer。**ALB target group `deregistration_delay.timeout_seconds` 必須對齊 60s**，否則 ALB 提早結束會讓尚未完成的請求消失。上限 120s |
 | `deploymentConfiguration.minimumHealthyPercent` | 100 | 對應 spec 01 §11.5，新 task ready 才開始砍舊 task |
 | `linuxParameters.initProcessEnabled` | **false** | 已用 `tini`，不要再啟用 ECS 自帶的 `init`（會雙層 init，訊號路徑變不明） |
-| `readonlyRootFilesystem` | true | image 內無寫入需求；如需 tmp 可掛 `tmpfs` volume |
+| `readonlyRootFilesystem` | true | image 內無寫入需求；Next.js 仍會寫 `/tmp`（image optimization 暫存）與 `/app/.next/cache`（fetch cache / ISR），必須掛 tmpfs，否則啟動時 EROFS error |
+| `mountPoints` + `volumes`（tmpfs） | `/tmp` → tmpfs 64MB、`/app/.next/cache` → tmpfs 256MB | 對應上一列。Fargate 用 `containerDefinitions[].mountPoints` 指向 `volumes[].name`，volume 設 `dockerVolumeConfiguration: {scope: "task", driver: "local", driverOpts: {type: "tmpfs"}}`。**若關閉 ISR / 不打 image-optimization API，仍需 `/tmp`**——pino transport / node 內部 tmp file 都會走它 |
 | `linuxParameters.capabilities.drop` | `["ALL"]` | Next.js server 不需任何 Linux capability |
 | `dockerSecurityOptions` | `["no-new-privileges:true"]` | 阻止子行程透過 setuid 提權 |
 
@@ -423,9 +470,21 @@ docker history --no-trunc --format '{{.CreatedBy}}' playerledger-frontend:test \
 **Runtime 檢查（SIGTERM drain 行為驗證）：**
 
 ```bash
-docker run -d --name pl-smoke -p 13000:3000 \
-  -e REDIS_HOST=127.0.0.1 \
+# /api/health（shallow）對齊 spec 01 §9.1 需檢查 Redis PING，因此 smoke 必須帶 redis sidecar，
+# 否則 HEALTHCHECK 永遠拿到 503，graceful shutdown 測試壓根跑不到
+docker network create pl-smoke-net
+docker run -d --name pl-smoke-redis --network pl-smoke-net \
+  redis:7-alpine --save "" --appendonly no
+docker run -d --name pl-smoke -p 13000:3000 --network pl-smoke-net \
+  -e REDIS_HOST=pl-smoke-redis \
+  -e API_BASE_URL=http://example.invalid \
+  -e CLIENT_ID=cms-web \
+  -e PUBLIC_ORIGIN=http://localhost:13000 \
+  -e APP_VERSION=smoke \
   playerledger-frontend:test
+
+cleanup() { docker rm -f pl-smoke pl-smoke-redis 2>/dev/null; docker network rm pl-smoke-net 2>/dev/null; }
+trap cleanup EXIT
 
 # 等到 HEALTHCHECK 翻 healthy（最多 60s）
 for i in $(seq 1 12); do
@@ -433,19 +492,22 @@ for i in $(seq 1 12); do
   [ "$STATUS" = "healthy" ] && break
   sleep 5
 done
-[ "$STATUS" = "healthy" ] || { docker logs pl-smoke; docker rm -f pl-smoke; exit 1; }
+[ "$STATUS" = "healthy" ] || { docker logs pl-smoke; exit 1; }
 
 # 送 SIGTERM 並計時，container 應在 stopTimeout 內退出（不是被 SIGKILL 砍）
+# stopTimeout 與 ECS task definition `stopTimeout: 60` 對齊（§3.6）
 START=$(date +%s)
-docker stop --time=30 pl-smoke
+docker stop --time=60 pl-smoke
 END=$(date +%s)
 EXIT_CODE=$(docker inspect --format='{{.State.ExitCode}}' pl-smoke)
-docker rm -f pl-smoke
+# pl-smoke / pl-smoke-redis / pl-smoke-net 由 trap cleanup 統一清理
 
 # tini 收到 SIGTERM 轉 Node → Node graceful shutdown → exit 0
-# 若沒 tini，PID 1 訊號被吃掉，會走到 30s SIGKILL，exit code = 137
+# 若沒 tini，PID 1 訊號被吃掉，會走到 SIGKILL，exit code = 137
 [ "$EXIT_CODE" = "0" ] || { echo "::error::expected graceful exit 0, got $EXIT_CODE"; exit 1; }
-[ $((END - START)) -lt 30 ] || { echo "::error::shutdown took $((END-START))s, likely SIGKILL'd"; exit 1; }
+[ $((END - START)) -lt 60 ] || { echo "::error::shutdown took $((END-START))s, likely SIGKILL'd"; exit 1; }
+# 對 idle container（無 in-flight），shutdown 應該在 5s 內完成，超過代表 graceful 路徑卡住
+[ $((END - START)) -lt 5 ]  || { echo "::warn::idle shutdown took $((END-START))s (>5s); investigate graceful path"; }
 echo "graceful shutdown OK (${EXIT_CODE} in $((END-START))s)"
 ```
 
