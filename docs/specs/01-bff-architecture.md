@@ -1089,15 +1089,28 @@ CI 階段可選擇性加入 `@security-headers/cli` 自動掃描（屬 nice-to-h
 
 ### 11.2 觸發時機
 
+CD **僅由 CI workflow 成功完成觸發**，透過 `on: workflow_run`；**不接受 `on: push` 直接觸發**，避免繞過 PR gate 與測試。
+
 | 觸發 | 動作 |
 |------|------|
-| Push to main 且 CI + image-scan 全通過 | 自動部署 staging |
-| Staging 部署成功 + 人工 approve | 部署 production |
-| Manual workflow_dispatch | 可指定任意 image tag 部署到任意環境（緊急回滾用）|
+| CI workflow（`ci.yml`）`conclusion == 'success'` 且 branch == main | 自動 build image → 部署 staging |
+| Staging 部署成功 + 人工 approve（GitHub Environment） | 部署 production |
+| Manual workflow_dispatch（**target，尚未在 cd.yml 落地**） | 可指定任意 image tag 部署到任意環境（緊急回滾用） |
+
+> **常見地雷**：早期版本曾同時宣告 `on: push:` 與 `on: workflow_run:`，並用 `if: github.event_name == 'push'` 在「check-ci」job 直接放行——結果 CI 失敗時 CD 仍會 build / deploy。**禁止以 `event_name == 'push'` 作為部署條件**，必須改用 `github.event.workflow_run.conclusion == 'success'`。
+>
+> **CI 沒有 image-scan**：v1 CI（[§8](#8-github-actions-ci)）為 4-job 極簡版，已將 image-scan 移到 CD 後或定期 scheduled scan；§11.2 觸發條件不再包含「image-scan 通過」。
 
 ### 11.3 Workflow 設定
 
+> **狀態說明**：以下 sample YAML 描述「**target 架構**」——CI 負責 build + push image，CD 只 deploy（透過 artifact 跨 workflow 拿 image tag）。
+>
+> **v1 實際 cd.yml**：`build-image` job 在 CD 內部執行（CI 完成 → workflow_run 觸發 → CD 自行 build & push & deploy）。原因：v1 CI 已簡化為 4 jobs（[§8.1](#81-設計原則)），不再產生 image artifact。target 架構待 image build 確定要回到 CI 時再切換。
+>
+> **共通必守**：無論 CI 或 CD build，**觸發條件一律是 `github.event.workflow_run.conclusion == 'success'`**，且 checkout 必須 `ref: ${{ github.event.workflow_run.head_sha }}`，避免部署到比 CI 測試過更新的 commit。
+
 ```yaml
+# Target 架構（image built in CI）的 sample YAML：
 # .github/workflows/cd.yml
 name: CD
 
@@ -1217,7 +1230,7 @@ jobs:
 
   deploy-production:
     needs: [resolve-tag, deploy-staging]
-    if: github.event_name == 'workflow_run' || github.event.inputs.environment == 'production'
+    if: github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: production    # GitHub Environment,設定要求人工 approval
     permissions:

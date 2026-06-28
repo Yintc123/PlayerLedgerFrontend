@@ -1,12 +1,8 @@
 name: CD
 
+# 嚴格規則：CD 只在 CI workflow 成功完成後觸發。
+# 不接受 `on: push` 直接觸發，避免繞過 PR gate 與測試。
 on:
-  push:
-    branches:
-      - main
-    paths-ignore:
-      - 'docs/**'
-      - 'README.md'
   workflow_run:
     workflows: ['CI']
     types: [completed]
@@ -20,31 +16,25 @@ permissions:
   id-token: write
   contents: read
 
-jobs:
-  check-ci:
-    runs-on: ubuntu-latest
-    if: github.event.workflow_run.conclusion == 'success' || github.event_name == 'push'
-    outputs:
-      should-deploy: ${{ steps.check.outputs.should-deploy }}
-    steps:
-      - name: Check if should deploy
-        id: check
-        run: |
-          if [[ "${{ github.ref }}" == "refs/heads/main" && "${{ github.event_name }}" == "push" ]]; then
-            echo "should-deploy=true" >> $GITHUB_OUTPUT
-          else
-            echo "should-deploy=false" >> $GITHUB_OUTPUT
-          fi
+# 序列化 CD 避免兩次 main push 同時推 image / deploy 撞 ECS rolling update。
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
 
+jobs:
   build-image:
-    needs: check-ci
     runs-on: ubuntu-latest
-    if: needs.check-ci.outputs.should-deploy == 'true'
+    # 硬閘門：CI 失敗 / cancelled / skipped 時整條 CD skip
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     outputs:
       image-uri: ${{ steps.image.outputs.uri }}
       image-digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 部署 CI 實際測試過的 commit，而非 main 當前 HEAD。
+          # 兩者可能不同：CI 跑時是 commit A，但 main 已被 commit B push 覆蓋。
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -68,7 +58,7 @@ jobs:
             type=ref,event=branch
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix={{branch}}-
+            type=sha,prefix={{branch}}-,value=${{ github.event.workflow_run.head_sha }}
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push (with SBOM + provenance)
@@ -87,15 +77,17 @@ jobs:
 
       - name: Set image URI
         id: image
-        run: echo "uri=${{ steps.ecr-login.outputs.registry }}/${{ env.IMAGE_NAME }}:${{ github.sha }}" >> $GITHUB_OUTPUT
+        run: |
+          echo "uri=${{ steps.ecr-login.outputs.registry }}/${{ env.IMAGE_NAME }}:${{ github.event.workflow_run.head_sha }}" >> $GITHUB_OUTPUT
 
   deploy-staging:
-    needs: [check-ci, build-image]
+    needs: build-image
     runs-on: ubuntu-latest
-    if: needs.check-ci.outputs.should-deploy == 'true'
     environment: staging
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -134,12 +126,13 @@ jobs:
           exit 1
 
   deploy-production:
-    needs: [check-ci, build-image, deploy-staging]
+    needs: [build-image, deploy-staging]
     runs-on: ubuntu-latest
-    if: needs.check-ci.outputs.should-deploy == 'true'
     environment: production
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
