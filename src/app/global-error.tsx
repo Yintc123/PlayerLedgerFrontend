@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect } from 'react'
-import { logger } from '@/lib/logger/logger'
 
 type GlobalErrorProps = {
   error: Error & { digest?: string }
@@ -27,16 +26,11 @@ export default function GlobalError({ error, reset }: GlobalErrorProps) {
       route: typeof window !== 'undefined' ? window.location.pathname : '',
     })
 
-    // 本地记录
-    logger.error(
-      {
-        type: 'client.error.global',
-        message: error.message,
-        fingerprint,
-        digest: error.digest,
-      },
-      'Unhandled client error',
-    )
+    // dev console 留痕；生產靠 /api/client-errors 的 server log
+    if (process.env.NODE_ENV !== 'production') {
+      // eslint-disable-next-line no-console
+      console.error('[global-error]', { fingerprint, digest: error.digest }, error)
+    }
   }, [error])
 
   return (

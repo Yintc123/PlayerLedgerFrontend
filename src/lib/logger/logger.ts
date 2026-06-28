@@ -1,4 +1,5 @@
 import pino from 'pino'
+import { trace } from '@opentelemetry/api'
 import { REDACT_PATHS, REDACT_REMOVE_PATHS } from './redact-paths'
 
 // ECS metadata —— ECS_CONTAINER_METADATA_URI_V4 由 ECS agent 自動注入（spec 03 §2.3）。
@@ -50,23 +51,15 @@ export const logger = pino(
     timestamp: pino.stdTimeFunctions.isoTime,
     /**
      * mixin：將 OTel active span 的 traceId / spanId 注入每筆 log（spec 03 §4.5）。
-     * 動態 require 避免 OTel 套件未安裝時整個 logger 起不來（本地 dev / OTEL_SDK_DISABLED）。
-     * mixin 為 sync 函式，try-catch 包住才不會把 logging path 弄壞。
+     * OTEL_SDK_DISABLED=true 時 OTel SDK 不會被 instrumentation 啟用，
+     * trace.getActiveSpan() 永遠回 undefined，fields 維持基底欄位。
      */
     mixin() {
       const fields: Record<string, string> = { ...ecsRuntimeFields }
-      if (process.env.OTEL_SDK_DISABLED === 'true') return fields
-      try {
-        // 使用 require 而非 import：mixin 是 sync 函式
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const { trace } = require('@opentelemetry/api')
-        const span = trace.getActiveSpan()
-        if (!span) return fields
-        const ctx = span.spanContext()
-        return { ...fields, traceId: ctx.traceId, spanId: ctx.spanId }
-      } catch {
-        return fields
-      }
+      const span = trace.getActiveSpan()
+      if (!span) return fields
+      const ctx = span.spanContext()
+      return { ...fields, traceId: ctx.traceId, spanId: ctx.spanId }
     },
     redact: {
       paths: REDACT_PATHS,
