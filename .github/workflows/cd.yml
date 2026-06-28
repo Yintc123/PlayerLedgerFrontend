@@ -1,12 +1,14 @@
 name: CD
 
-# 嚴格規則：CD 只在 CI workflow 成功完成後觸發。
-# 不接受 `on: push` 直接觸發，避免繞過 PR gate 與測試。
+# CD 觸發來源：
+#   1. workflow_run — CI 成功後自動接續（正常路徑）
+#   2. workflow_dispatch — Actions UI 手動觸發（workflow_run 延遲 / 排查 / 純 infra 改動時用）
 on:
   workflow_run:
     workflows: ['CI']
     types: [completed]
     branches: [main]
+  workflow_dispatch:
 
 env:
   IMAGE_NAME: igs_frontend
@@ -24,8 +26,8 @@ concurrency:
 jobs:
   build-image:
     runs-on: ubuntu-latest
-    # 硬閘門：CI 失敗 / cancelled / skipped 時整條 CD skip
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    # workflow_run：CI 必須 success；workflow_dispatch：手動觸發直接放行
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     outputs:
       image-uri: ${{ steps.image.outputs.uri }}
       image-digest: ${{ steps.build.outputs.digest }}
@@ -34,7 +36,7 @@ jobs:
         with:
           # 部署 CI 實際測試過的 commit，而非 main 當前 HEAD。
           # 兩者可能不同：CI 跑時是 commit A，但 main 已被 commit B push 覆蓋。
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -58,7 +60,7 @@ jobs:
             type=ref,event=branch
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix={{branch}}-,value=${{ github.event.workflow_run.head_sha }}
+            type=sha,prefix={{branch}}-,value=${{ github.event.workflow_run.head_sha || github.sha }}
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push (with SBOM + provenance)
@@ -78,7 +80,7 @@ jobs:
       - name: Set image URI
         id: image
         run: |
-          echo "uri=${{ steps.ecr-login.outputs.registry }}/${{ env.IMAGE_NAME }}:${{ github.event.workflow_run.head_sha }}" >> $GITHUB_OUTPUT
+          echo "uri=${{ steps.ecr-login.outputs.registry }}/${{ env.IMAGE_NAME }}:${{ github.event.workflow_run.head_sha || github.sha }}" >> $GITHUB_OUTPUT
 
   deploy-staging:
     needs: build-image
@@ -87,7 +89,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -140,7 +142,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
