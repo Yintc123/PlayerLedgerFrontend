@@ -139,7 +139,7 @@ jobs:
           images: ${{ steps.ecr-login.outputs.registry }}/${{ env.IMAGE_NAME }}
           tags: |
             type=ref,event=branch
-            type=sha,prefix={{branch}}-,value=${{ github.sha }}
+            type=raw,value=${{ github.sha }}
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push (with SBOM + provenance)
