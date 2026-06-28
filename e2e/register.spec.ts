@@ -27,7 +27,7 @@ test.describe('Register Flow', () => {
     await page.getByLabel('確認密碼').fill('different456');
     await page.getByRole('button', { name: '建立帳號' }).click();
 
-    await expect(page.getByRole('alert')).toContainText('密碼與確認密碼不一致');
+    await expect(page.locator('[data-slot="alert"]')).toContainText('密碼與確認密碼不一致');
     await expect(page).toHaveURL('/register');
   });
 
@@ -43,7 +43,7 @@ test.describe('Register Flow', () => {
     await page.getByRole('button', { name: '建立帳號' }).click();
 
     await expect(page).toHaveURL('/login?registered=true');
-    await expect(page.getByRole('alert')).toContainText('註冊成功，請以新帳號登入');
+    await expect(page.locator('[data-slot="alert"]')).toContainText('註冊成功，請以新帳號登入');
   });
 
   test('/register submit with duplicate username → red alert with backend message', async ({
@@ -63,7 +63,7 @@ test.describe('Register Flow', () => {
     await page.getByLabel('確認密碼').fill('password123');
     await page.getByRole('button', { name: '建立帳號' }).click();
 
-    await expect(page.getByRole('alert')).toContainText('此帳號已被使用，請換一個');
+    await expect(page.locator('[data-slot="alert"]')).toContainText('此帳號已被使用，請換一個');
     await expect(page).toHaveURL('/register');
   });
 });
