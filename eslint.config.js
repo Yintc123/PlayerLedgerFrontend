@@ -1,18 +1,11 @@
-import js from '@eslint/js'
-import typescript from 'typescript-eslint'
-import react from 'eslint-plugin-react'
-import nextPlugin from 'eslint-config-next'
+import js from '@eslint/js';
+import typescript from 'typescript-eslint';
+import react from 'eslint-plugin-react';
+import nextPlugin from 'eslint-config-next';
 
 export default [
   {
-    ignores: [
-      'node_modules',
-      '.next',
-      'dist',
-      'coverage',
-      'playwright-report',
-      '.env*.local',
-    ],
+    ignores: ['node_modules', '.next', 'dist', 'coverage', 'playwright-report', '.env*.local'],
   },
   js.configs.recommended,
   ...typescript.configs.recommended,
@@ -53,4 +46,12 @@ export default [
       '@typescript-eslint/no-explicit-any': 'warn',
     },
   },
-]
+  {
+    // Mocks in test files often need `any` (vi.mocked casts, partial stubs);
+    // production code stays under the warn rule.
+    files: ['**/*.test.ts', '**/*.test.tsx', '**/*.spec.ts', '**/*.spec.tsx'],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
+    },
+  },
+];

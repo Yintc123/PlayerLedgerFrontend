@@ -1,11 +1,11 @@
-'use client'
+'use client';
 
-import { useEffect } from 'react'
+import { useEffect } from 'react';
 
 type GlobalErrorProps = {
-  error: Error & { digest?: string }
-  reset: () => void
-}
+  error: Error & { digest?: string };
+  reset: () => void;
+};
 
 /**
  * 全局错误边界 (§6.1)
@@ -14,7 +14,7 @@ type GlobalErrorProps = {
 export default function GlobalError({ error, reset }: GlobalErrorProps) {
   useEffect(() => {
     // 生成稳定的错误指纹以去重
-    const fingerprint = generateFingerprint(error)
+    const fingerprint = generateFingerprint(error);
 
     // 发送到后端
     reportError({
@@ -24,14 +24,13 @@ export default function GlobalError({ error, reset }: GlobalErrorProps) {
       digest: error.digest,
       userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
       route: typeof window !== 'undefined' ? window.location.pathname : '',
-    })
+    });
 
     // dev console 留痕；生產靠 /api/client-errors 的 server log
     if (process.env.NODE_ENV !== 'production') {
-      // eslint-disable-next-line no-console
-      console.error('[global-error]', { fingerprint, digest: error.digest }, error)
+      console.error('[global-error]', { fingerprint, digest: error.digest }, error);
     }
-  }, [error])
+  }, [error]);
 
   return (
     <html>
@@ -56,7 +55,7 @@ export default function GlobalError({ error, reset }: GlobalErrorProps) {
         </div>
       </body>
     </html>
-  )
+  );
 }
 
 /**
@@ -64,35 +63,32 @@ export default function GlobalError({ error, reset }: GlobalErrorProps) {
  */
 function generateFingerprint(error: Error): string {
   // 基于错误信息和堆栈的前几行生成 hash
-  const content = `${error.message}:${(error.stack || '').split('\n').slice(0, 3).join('|')}`
+  const content = `${error.message}:${(error.stack || '').split('\n').slice(0, 3).join('|')}`;
   // 简单的 hash - 生产环境应该使用更好的方案
-  let hash = 0
+  let hash = 0;
   for (let i = 0; i < content.length; i++) {
-    const char = content.charCodeAt(i)
-    hash = (hash << 5) - hash + char
-    hash = hash & hash // Convert to 32-bit integer
+    const char = content.charCodeAt(i);
+    hash = (hash << 5) - hash + char;
+    hash = hash & hash; // Convert to 32-bit integer
   }
-  return `error-${Math.abs(hash)}`
+  return `error-${Math.abs(hash)}`;
 }
 
 /**
  * 将错误报告发送到 /api/client-errors
  */
 async function reportError(data: {
-  message: string
-  stack: string
-  fingerprint: string
-  digest?: string
-  userAgent: string
-  route: string
+  message: string;
+  stack: string;
+  fingerprint: string;
+  digest?: string;
+  userAgent: string;
+  route: string;
 }) {
   try {
     // 使用 sendBeacon 确保请求被发送（即使页面卸载）
     if (navigator?.sendBeacon) {
-      navigator.sendBeacon(
-        '/api/client-errors',
-        JSON.stringify(data),
-      )
+      navigator.sendBeacon('/api/client-errors', JSON.stringify(data));
     } else {
       // Fallback to fetch
       await fetch('/api/client-errors', {
@@ -101,10 +97,10 @@ async function reportError(data: {
         body: JSON.stringify(data),
         // 页面卸载时使用 keepalive
         keepalive: true,
-      })
+      });
     }
   } catch (err) {
     // 错误报告本身失败时静默处理
-    console.error('[ErrorReporting]', err)
+    console.error('[ErrorReporting]', err);
   }
 }
