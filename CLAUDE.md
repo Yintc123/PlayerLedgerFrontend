@@ -20,6 +20,17 @@
 - UI 元件使用 React Testing Library，測試使用者行為而非實作細節
 - 不 mock 內部模組，只 mock 外部依賴（API、瀏覽器 API）
 
+### 測試命名以 spec 為準
+
+測試清單已在對應 spec 寫好（`docs/specs/01-bff-architecture.md §6.4 / §9.5`、`docs/specs/02-auth-session.md §9`、`docs/specs/03-observability.md §6`）。實作時：
+
+1. 先讀對應 spec 的測試清單
+2. 依清單建立失敗測試（Red）
+3. 實作最少程式碼讓測試通過（Green）
+4. spec 沒列的測試代表設計階段未要求，新增前先評估是否該回頭更新 spec
+
+避免「測試與 spec 不同步」——這是 SDD + TDD 結合的核心紀律。
+
 ### 測試分層
 
 | 層級 | 工具 | 涵蓋範圍 |

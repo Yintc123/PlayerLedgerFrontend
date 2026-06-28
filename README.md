@@ -75,8 +75,11 @@ docker push <ECR_URI>:latest
 
 ```
 PlayerLedgerFrontend/
-├── app/          # App Router 頁面與佈局
-├── components/   # 共用元件
-├── lib/          # 工具函式與 API 呼叫
-└── public/       # 靜態資源
+├── src/
+│   ├── app/          # App Router 頁面與佈局
+│   ├── components/   # 共用元件
+│   ├── lib/          # 工具函式與 API 呼叫
+│   ├── proxy.ts      # 路由保護（Next.js 16）
+│   └── schema/       # OpenAPI Schema
+└── public/           # 靜態資源
 ```
