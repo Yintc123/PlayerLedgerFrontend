@@ -16,6 +16,8 @@ env:
 # v1 採極簡 4-job CI：typecheck / lint / test-unit / test-e2e（spec 01 §8）。
 # 已從 PR gate 移出：schema-check（待 OpenAPI 上線重啟）、audit-deps、audit-licenses、
 # build / image-scan（由 cd.yml 負責，避免 CI/CD 重複建 image）。
+# E2E webServer 使用 start:e2e（cp static → standalone 目錄後啟動 node standalone server），
+# 避免 next start + output:standalone 不相容問題（靜態 JS 不被正確提供，React 無法 hydrate）。
 jobs:
   typecheck:
     name: Type Check

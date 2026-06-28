@@ -25,7 +25,7 @@ export default defineConfig({
 
   // CI 執行 npm run build 後直接 next start；本機開發用 next dev（HMR）
   webServer: {
-    command: process.env.CI ? 'npm run start' : 'npm run dev',
+    command: process.env.CI ? 'npm run start:e2e' : 'npm run dev',
     url: 'http://localhost:3000',
     reuseExistingServer: !process.env.CI,
     timeout: 120000,
