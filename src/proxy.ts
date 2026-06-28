@@ -180,6 +180,8 @@ export async function proxy(request: NextRequest) {
 
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   response.headers.set('Content-Security-Policy', buildCsp(nonce));
+  // X-Request-ID 對 client 暴露，供 client log / 客服回報串接（spec 03 §1.1）
+  response.headers.set('X-Request-ID', requestId);
 
   return response;
 }

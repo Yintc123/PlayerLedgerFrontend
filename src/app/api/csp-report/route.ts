@@ -72,7 +72,8 @@ export async function POST(request: NextRequest) {
       'CSP violation reported'
     );
 
-    return NextResponse.json({ success: true }, { status: 204 });
+    // 204 No Content 依 fetch spec 必須無 body（Node undici 對 204 + body 直接 throw）。
+    return new NextResponse(null, { status: 204 });
   } catch (err) {
     reqLogger.error(
       {
