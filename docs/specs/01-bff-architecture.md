@@ -516,13 +516,24 @@ test('should redirect to login when session expires')
 
 ### 8.1 設計原則
 
-對齊後端 CI 設計模式（後端 infrastructure.md §23）：
+對齊後端 CI 設計模式（後端 infrastructure.md §23），但 v1 採極簡 PR gate：
 
-- 觸發時機：**PR 開啟 / 更新**與 **push 到 main**
-- 五個 job 平行執行：`typecheck`、`lint`、`schema-check`、`test-unit`、`test-e2e`
-- `build` job 等待全部通過才執行
+- 觸發時機：**PR 開啟 / 更新**與 **push 到 main / develop**
+- **四個** job 平行執行：`typecheck`、`lint`、`test-unit`、`test-e2e`
 - E2E job 以 GitHub Actions `services` 啟動 Redis 容器
 - 失敗時上傳 Playwright report artifact 供除錯
+
+#### v1 已從 CI 移出的 jobs
+
+| 原 job | 移到哪 | 為何不在 PR gate |
+|--------|--------|------------------|
+| `schema-check` | 暫不執行（OpenAPI 還沒上線） | `schema/openapi.yaml` 尚未建立；待後端契約落地時於 §8.6 重新啟用 |
+| `audit-deps` (`npm audit`) | dependabot + 定期 scheduled workflow（待加） | PR gate 因 transitive deps 偶發 advisory 容易誤擋；非 v1 阻斷項 |
+| `audit-licenses` (`license-checker`) | 同上 | 同上；license 衝突在 dep 變更時稽核即可 |
+| `build` (Docker build) | `cd.yml` | CD 已負責 build + push 到 ECR；CI 重複 build 是浪費 cache 與 runtime |
+| `image-scan` (Trivy) | `cd.yml`（push 階段一併掃） | image 在 CD 才產生，CI 沒有實體 image 可掃 |
+
+> **未來何時補回**：OpenAPI 落地 → `schema-check`；正式上線前 → 加排程 `audit-deps` / `audit-licenses` weekly workflow（用 issue 通知而非阻斷 PR）；Trivy 改為對 ECR 內既有 image 做 scheduled scan。所有「未來補回」項目本身仍屬本 spec 範圍，僅 v1 PR gate 不含。
 
 #### Action 版本固定政策（supply-chain）
 
@@ -534,101 +545,94 @@ test('should redirect to login when session expires')
 
 > **為何高權限 actions 必須 SHA-pin**：tag 是可變指標，倉庫所有者可重發同名 tag 指向新 commit。一旦 action 倉庫被攻陷（GitHub 帳號被盜、刻意 supply-chain 注入），高權限 action 會立即拿到 AWS credentials / OIDC token / push 權限。SHA-pin 鎖死「我信任的是這個歷史版本的程式碼」。CodeQL `pinned-tags` 規則與 OpenSSF Scorecard 都把此項列為 critical。
 >
-> **本 spec 的 sample YAML（§8.4、§11.3）目前以 `@v4` 形式示意**：實際 CI workflow 落地時，必須將高權限列的 actions 全數替換為 commit SHA + 註解原 tag，例 `uses: aws-actions/configure-aws-credentials@<sha>  # v4.0.2`。dependabot 設定（`.github/dependabot.yml`）開啟 `package-ecosystem: github-actions` 並設 `commit-message.prefix: "chore(actions)"`，PR 自動更新 SHA + tag 註解。
+> **§8.4 ci.yml 已落地為 SHA-pinned**（actions/checkout、actions/setup-node、actions/upload-artifact 皆採 commit SHA + tag 註解形式）。**§11.3 cd.yml 仍以 `@v4` 示意**，落地時必須補上 SHA-pin——尤其 `aws-actions/configure-aws-credentials`、`aws-actions/amazon-ecr-login`、`aws-actions/amazon-ecs-deploy-task-definition`、`docker/build-push-action`、`docker/setup-buildx-action`、`aquasecurity/trivy-action`、`github/codeql-action/*`（全在高權限類）。
 >
-> **`aquasecurity/trivy-action@master` 的特例處理**：本 spec §8.4 line 723 使用 `@master`，**必須** 改為固定 release SHA。Trivy 主分支變動頻繁，使用 `@master` 等於 CI 行為每天可能不同，且失去威脅模型上的可重複性。
+> **dependabot**：`.github/dependabot.yml` 開啟 `package-ecosystem: github-actions` 並設 `commit-message.prefix: "chore(actions)"`，PR 自動更新 SHA + tag 註解。
+>
+> **`aquasecurity/trivy-action@master` 的特例處理**：原 spec 的 sample 曾用 `@master`；落地至 `cd.yml`（或未來 scheduled scan workflow）時**必須** 改為固定 release SHA。Trivy 主分支變動頻繁，`@master` 等於 CI 行為每天可能不同。
 
 ### 8.2 Job 相依關係
 
 ```
-typecheck ─────────┐
-lint ──────────────┤
-schema-check ──────┤
-test-unit ─────────┤
-test-e2e ──────────┼──→ build ──→ image-scan ──→ deploy（push to main only）
-audit-deps ────────┤
-audit-licenses ────┘
+typecheck ─┐
+lint ──────┤
+test-unit ─┤   （4 jobs 完全平行，互不阻擋）
+test-e2e ──┘
+
+   ↓（CI 全綠後 GitHub workflow_run 觸發）
+
+cd.yml: build → push ECR → deploy staging → deploy production
+        （詳見 cd.yml；CI 不參與 image 建置 / push / deploy）
 ```
 
-安全掃描 job（`audit-deps`、`audit-licenses`）與其他驗證 job 並行,不阻擋彼此但**全部都得通過 build 才會跑**。
-`image-scan` 掃描 build 產出的 Docker image。
-`deploy` 只在 push to main 時觸發,PR 不部署（避免 fork PR 拿到 production credentials）。
+CI 為純 PR gate；image build / push / deploy 完全由 `cd.yml` 負責，CD 透過 `workflow_run: workflows: ['CI']` 等待 CI 通過後才執行（避免 fork PR 拿到 production credentials）。
 
 ### 8.3 npm scripts（`package.json` 必須定義）
 
-| script | 指令 | 用途 |
-|--------|------|------|
-| `typecheck` | `tsc --noEmit` | 型別檢查 |
-| `lint` | `next lint` | ESLint |
-| `test` | `vitest run` | Unit + Component 測試（單次執行） |
-| `test:watch` | `vitest` | 開發時監聽模式 |
-| `test:e2e` | `playwright test` | E2E 測試 |
-| `build` | `next build` | 生產建置 |
-| `generate:types` | `openapi-typescript src/schema/openapi.yaml -o src/lib/api-client/generated/types.gen.ts` | 從 OpenAPI Schema 產生型別 |
+| script | 指令 | 用途 | CI 強制 |
+|--------|------|------|:------:|
+| `type-check` | `tsc --noEmit` | 型別檢查 | ✅ |
+| `lint` | `eslint src --max-warnings 0` | ESLint | ✅ |
+| `format:check` | `prettier --check .` | Prettier 格式檢查 | ✅ |
+| `test` | `vitest run` | Unit + Component 測試（單次執行） | ✅ |
+| `test:watch` | `vitest` | 開發時監聽模式 |  |
+| `test:e2e` | `playwright test` | E2E 測試 | ✅ |
+| `build` | `next build` | 生產建置 | （CD） |
+| `generate:types` | `openapi-typescript src/schema/openapi.yaml -o src/lib/api-client/generated/types.gen.ts` | 從 OpenAPI Schema 產生型別 | （v1 本地） |
+
+> **`generate:types` 為何 v1 不在 CI 強制**：OpenAPI schema 尚未落地，自動 diff 失去依據；待 §8.6 schema-check 重啟時改為 CI 強制。v1 期間若手動更新 schema → 開發者責任跑 `npm run generate:types` 並 commit，PR review 時人工把關。
 
 ### 8.4 Workflow 設定
 
 ```yaml
-# .github/workflows/ci.yml
+# .github/workflows/ci.yml — v1 minimal PR gate
 name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
-  NODE_VERSION: '22'
+  NODE_VERSION: '22.x'
 
 jobs:
   typecheck:
     name: Type Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
       - run: npm ci
-      - run: npm run typecheck
+      - run: npm run type-check
 
   lint:
-    name: Lint
+    name: Lint & Format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
       - run: npm ci
       - run: npm run lint
-
-  schema-check:
-    name: OpenAPI Schema & Generated Types
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-      - run: npm ci
-      # 1. Schema 語法驗證
-      - run: npx --yes @redocly/cli lint src/schema/openapi.yaml
-      # 2. 重新產生型別，確認 committed 的 types.gen.ts 與 schema 同步
-      - run: npm run generate:types
-      - name: Verify generated types are up to date
-        run: git diff --exit-code src/lib/api-client/generated/
+      - run: npm run format:check
 
   test-unit:
     name: Unit & Component Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -650,132 +654,60 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: npm run build
+      - name: Build
+        run: npm run build
         env:
           REDIS_HOST: localhost
           REDIS_PORT: 6379
-          API_BASE_URL: ${{ secrets.E2E_API_BASE_URL }}
-      - run: npm run test:e2e
+          API_BASE_URL: ${{ secrets.E2E_API_BASE_URL || 'http://localhost:8080' }}
+          PUBLIC_ORIGIN: http://localhost:3000
+          CLIENT_ID: cms-web
+      - name: Run E2E
+        run: npm run test:e2e
         env:
           REDIS_HOST: localhost
           REDIS_PORT: 6379
-          API_BASE_URL: ${{ secrets.E2E_API_BASE_URL }}
-      - uses: actions/upload-artifact@v4
+          API_BASE_URL: ${{ secrets.E2E_API_BASE_URL || 'http://localhost:8080' }}
+          PUBLIC_ORIGIN: http://localhost:3000
+          CLIENT_ID: cms-web
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         if: failure()
         with:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
-
-  audit-deps:
-    name: Dependency Vulnerability Scan
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-      - run: npm ci
-      # 只擋 high / critical,允許 moderate（依社群實踐,moderate 多為 transitive deps 偶發報告）
-      - run: npm audit --audit-level=high --omit=dev
-
-  audit-licenses:
-    name: License Compliance
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-      - run: npm ci
-      # 禁止 GPL / AGPL 等 copyleft 授權混入生產依賴
-      - run: npx --yes license-checker --production --failOn 'GPL;AGPL;LGPL'
-
-  build:
-    name: Build & Push Image
-    runs-on: ubuntu-latest
-    needs: [typecheck, lint, schema-check, test-unit, test-e2e, audit-deps, audit-licenses]
-    permissions:
-      id-token: write    # OIDC 取得 AWS 暫時憑證,避免長期 access key
-      contents: read
-    outputs:
-      image-tag: ${{ steps.meta.outputs.tag }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Generate image tag
-        id: meta
-        run: echo "tag=${GITHUB_SHA::7}-$(date -u +%Y%m%d%H%M%S)" >> "$GITHUB_OUTPUT"
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION }}
-      - uses: aws-actions/amazon-ecr-login@v2
-        id: ecr
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          tags: |
-            ${{ steps.ecr.outputs.registry }}/playerledger-frontend:${{ steps.meta.outputs.tag }}
-          # `:latest` 刻意不 push：ECR repository 設 imageTagMutability=IMMUTABLE，
-          # 不可覆寫；deploy 一律用具體 commit-based tag（§11.3），不允許 :latest 漂移風險
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  image-scan:
-    name: Container Image Vulnerability Scan
-    runs-on: ubuntu-latest
-    needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    permissions:
-      id-token: write
-      contents: read
-      security-events: write   # 把結果上傳到 GitHub Security tab
-    steps:
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION }}
-      - uses: aws-actions/amazon-ecr-login@v2
-        id: ecr
-      - name: Run Trivy
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ steps.ecr.outputs.registry }}/playerledger-frontend:${{ needs.build.outputs.image-tag }}
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-          severity: 'HIGH,CRITICAL'
-          exit-code: '1'        # high / critical 直接擋 deploy
-      - uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: trivy-results.sarif
 ```
+
+Build / push / deploy 的 workflow 完整 YAML 見 `cd.yml`，不在本 spec 範圍；CD 透過 `workflow_run: workflows: ['CI']` 等待本 workflow 通過。
 
 ### 8.5 必填 GitHub Secrets
 
+**CI（本 workflow）僅需一個 secret**：
+
+| Secret | 說明 | 預設 fallback |
+|--------|------|--------------|
+| `E2E_API_BASE_URL` | E2E 測試指向的 Go API Server URL | `http://localhost:8080`（PR fork 無 secret 時用 mock） |
+
+**CD（`cd.yml`）secrets**（不在本 workflow 使用，列在 CD spec 範圍；此處僅備忘）：
+
 | Secret | 說明 |
 |--------|------|
-| `E2E_API_BASE_URL` | E2E 測試指向的 Go API Server URL |
-| `AWS_DEPLOY_ROLE_ARN` | OIDC 信任的 IAM Role ARN,有 ECR push 與 ECS update-service 權限 |
+| `AWS_DEPLOY_ROLE_ARN` | OIDC 信任的 IAM Role ARN，有 ECR push 與 ECS update-service 權限 |
 | `AWS_REGION` | 部署目標區域（如 `ap-northeast-1`） |
-| `ECS_CLUSTER` | ECS 叢集名稱（CD job 使用） |
-| `ECS_SERVICE` | ECS 服務名稱（CD job 使用） |
-| `ECS_TASK_FAMILY` | ECS Task Definition family 名稱 |
+| `STAGING_URL` / `PRODUCTION_URL` | 健康檢查目標 URL |
 
-> **不存 AWS access key 為長期 secret**: 採用 GitHub OIDC + IAM Role assumption,每次 workflow 取得有效期 1 小時的暫時憑證。長期 access key 一旦洩漏無法立即作廢,OIDC 暫時憑證限縮爆炸半徑。詳見 [AWS OIDC 設定指南](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_create_oidc.html)。
+> **不存 AWS access key 為長期 secret**：採用 GitHub OIDC + IAM Role assumption，每次 workflow 取得有效期 1 小時的暫時憑證。長期 access key 一旦洩漏無法立即作廢，OIDC 暫時憑證限縮爆炸半徑。詳見 [AWS OIDC 設定指南](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_create_oidc.html)。
 
-### 8.6 schema-check 的 SDD 保護機制
+### 8.6 schema-check 的 SDD 保護機制（v1 deferred）
+
+> **狀態**：v1 不啟用——`schema/openapi.yaml` 尚未建立、`src/lib/api-client/generated/` 尚未產出。本節記錄 v1.x 一旦後端 OpenAPI 落地後須**立刻**啟用的 job。
 
 `schema-check` job 的 `git diff --exit-code` 確保 `types.gen.ts` 與 `openapi.yaml` 保持同步：
 
@@ -788,6 +720,31 @@ jobs:
 ```
 
 這是 SDD 工作流程的強制守門機制，避免型別與實際 API 契約脫節。
+
+#### 啟用條件（checklist）
+
+- [ ] `src/schema/openapi.yaml` 上線（後端契約定稿）
+- [ ] `npm run generate:types` 可在本地端產出 `src/lib/api-client/generated/types.gen.ts` 且不報錯
+- [ ] 將下列 job 加回 `ci.yml`（直接從本節 YAML 複製，並加上 §8.1 表格列回去）：
+
+```yaml
+  schema-check:
+    name: OpenAPI Schema & Generated Types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - run: npx --yes @redocly/cli lint src/schema/openapi.yaml
+      - run: npm run generate:types
+      - name: Verify generated types are up to date
+        run: git diff --exit-code src/lib/api-client/generated/
+```
+
+> **v1 期間的替代守則**：開發者修改 schema 後須**手動** `npm run generate:types` 並 commit；PR review 時 reviewer 確認兩者同步。此守則無自動化保障，故是 v1 暫時方案。
 
 ---
 
