@@ -1,0 +1,253 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22.x'
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────────
+  # 五個平行 quality gates（spec 01 §8.4）
+  # ──────────────────────────────────────────────────────────────────────────
+
+  typecheck:
+    name: Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run type-check
+
+  lint:
+    name: Lint & Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run format:check
+
+  schema-check:
+    name: OpenAPI Schema & Generated Types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      # 1. Schema 語法驗證（schema 檔案上線後啟用）
+      - name: Lint OpenAPI schema
+        run: |
+          if [ -f src/schema/openapi.yaml ]; then
+            npx --yes @redocly/cli lint src/schema/openapi.yaml
+          else
+            echo "::warning::src/schema/openapi.yaml not present; skipping lint"
+          fi
+      # 2. 重新產生型別，確認 committed 的 types.gen.ts 與 schema 同步（SDD 保護機制）
+      - name: Verify generated types up to date
+        run: |
+          if [ -f src/schema/openapi.yaml ]; then
+            npm run generate:types
+            git diff --exit-code src/lib/api-client/generated/
+          else
+            echo "::warning::skipping types diff check; schema not present"
+          fi
+
+  test-unit:
+    name: Unit & Component Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      # 所有外部依賴均 mock，不需 Redis service
+      - run: npm run test
+
+  test-e2e:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Build
+        run: npm run build
+        env:
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          API_BASE_URL: ${{ secrets.E2E_API_BASE_URL || 'http://localhost:8080' }}
+          PUBLIC_ORIGIN: http://localhost:3000
+          CLIENT_ID: cms-web
+      - name: Run E2E
+        run: npm run test:e2e
+        env:
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          API_BASE_URL: ${{ secrets.E2E_API_BASE_URL || 'http://localhost:8080' }}
+          PUBLIC_ORIGIN: http://localhost:3000
+          CLIENT_ID: cms-web
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Supply-chain audits (run in parallel with the quality gates)
+  # ──────────────────────────────────────────────────────────────────────────
+
+  audit-deps:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      # 只擋 high / critical；允許 moderate（多為 transitive deps 偶發報告）
+      - run: npm audit --audit-level=high --omit=dev
+
+  audit-licenses:
+    name: License Compliance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      # 禁止 GPL / AGPL 等 copyleft 授權混入 production deps
+      - run: npx --yes license-checker --production --failOn 'GPL;AGPL;LGPL'
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Build & Push: waits for ALL quality gates + audits (spec 01 §8.4)
+  # ──────────────────────────────────────────────────────────────────────────
+
+  build:
+    name: Build & Push Image
+    runs-on: ubuntu-latest
+    needs: [typecheck, lint, schema-check, test-unit, test-e2e, audit-deps, audit-licenses]
+    permissions:
+      id-token: write    # OIDC：避免長期 access key
+      contents: read
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Generate image tag
+        id: meta
+        run: echo "tag=${GITHUB_SHA::7}-$(date -u +%Y%m%d%H%M%S)" >> "$GITHUB_OUTPUT"
+
+      # APP_VERSION assertion (spec 04 §5.2)
+      - name: Assert APP_VERSION not unknown
+        run: |
+          if [ -z "${{ steps.meta.outputs.tag }}" ] || [ "${{ steps.meta.outputs.tag }}" = "unknown" ]; then
+            echo "::error::APP_VERSION must not be 'unknown' for production builds"
+            exit 1
+          fi
+
+      - uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db # v3.6.1
+      - name: Build image
+        uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6.9.0
+        with:
+          context: .
+          push: false
+          load: true
+          tags: playerledger-frontend:${{ steps.meta.outputs.tag }}
+          build-args: |
+            APP_VERSION=${{ steps.meta.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Image size budget (spec 04 §6.3)
+      - name: Verify image size budget (≤ 250 MB)
+        run: |
+          SIZE_BYTES=$(docker image inspect playerledger-frontend:${{ steps.meta.outputs.tag }} --format '{{.Size}}')
+          SIZE_MB=$((SIZE_BYTES / 1024 / 1024))
+          echo "Image size: ${SIZE_MB} MB"
+          if [ "$SIZE_MB" -gt 250 ]; then
+            echo "::error::Image size ${SIZE_MB} MB exceeds 250 MB budget"
+            exit 1
+          fi
+
+      # Image smoke tests (spec 04 §6.1)
+      - name: Smoke test - non-root user (UID 1001)
+        run: |
+          UID_FROM_IMAGE=$(docker run --rm --entrypoint id playerledger-frontend:${{ steps.meta.outputs.tag }} -u)
+          if [ "$UID_FROM_IMAGE" != "1001" ]; then
+            echo "::error::Container runs as UID $UID_FROM_IMAGE, expected 1001"
+            exit 1
+          fi
+
+      - name: Smoke test - tini is PID 1 init
+        run: |
+          docker run --rm --entrypoint sh playerledger-frontend:${{ steps.meta.outputs.tag }} \
+            -c 'test -x /sbin/tini || (echo "::error::/sbin/tini not present"; exit 1)'
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Trivy image scan: post-build, blocking on HIGH/CRITICAL (spec 01 §8.4)
+  # ──────────────────────────────────────────────────────────────────────────
+
+  image-scan:
+    name: Container Image Vulnerability Scan
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      # NOTE: Trivy action is SHA-pinned per spec 01 §8.1 (no @master)
+      - name: Run Trivy
+        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0 # 0.29.0
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'HIGH,CRITICAL'
+          exit-code: '1'
+      - uses: github/codeql-action/upload-sarif@4dd16135b69a43b6c8efb853346f8437d92d3c93 # v3.26.6
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif

@@ -1,0 +1,72 @@
+# .dockerignore — 對齊 spec 04 §4
+
+# Dependencies / build output（builder stage 重建）
+node_modules
+.next
+.turbo
+dist
+build
+
+# VCS
+.git
+.gitignore
+.gitattributes
+
+# 環境變數與本機憑證（絕對禁止進 image layer history）
+.env
+.env.local
+.env.*.local
+.env.example
+.npmrc
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets/
+**/credentials
+
+# 基礎設施與部署設定（不該打包進 runtime image）
+deploy/
+terraform/
+*.tf
+*.tfstate*
+infra/
+.aws
+
+# Test artifacts
+coverage
+.nyc_output
+test-results
+playwright-report
+*.lcov
+
+# Editor / OS
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Documentation
+docs
+*.md
+!README.md
+IMPLEMENTATION_SUMMARY.md
+IMPLEMENTATION_COMPLETE.md
+SPEC_COMPLIANCE.md
+DEPLOYMENT.md
+
+# CI / build metadata
+.github
+.circleci
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Logs
+*.log
+npm-debug.log*
+yarn-error.log*

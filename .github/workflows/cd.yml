@@ -1,0 +1,209 @@
+name: CD
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'docs/**'
+      - 'README.md'
+  workflow_run:
+    workflows: ['CI']
+    types: [completed]
+    branches: [main]
+
+env:
+  IMAGE_NAME: playerledger/frontend
+
+# OIDC（spec 04 §5.2 + ADR 018）：不使用長期 AWS access key。
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  check-ci:
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success' || github.event_name == 'push'
+    outputs:
+      should-deploy: ${{ steps.check.outputs.should-deploy }}
+    steps:
+      - name: Check if should deploy
+        id: check
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" && "${{ github.event_name }}" == "push" ]]; then
+            echo "should-deploy=true" >> $GITHUB_OUTPUT
+          else
+            echo "should-deploy=false" >> $GITHUB_OUTPUT
+          fi
+
+  build-image:
+    needs: check-ci
+    runs-on: ubuntu-latest
+    if: needs.check-ci.outputs.should-deploy == 'true'
+    outputs:
+      image-uri: ${{ steps.image.outputs.uri }}
+      image-digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.ecr-login.outputs.registry }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push (with SBOM + provenance)
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          sbom: true
+          provenance: mode=max
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Set image URI
+        id: image
+        run: echo "uri=${{ steps.ecr-login.outputs.registry }}/${{ env.IMAGE_NAME }}:${{ github.sha }}" >> $GITHUB_OUTPUT
+
+  deploy-staging:
+    needs: [check-ci, build-image]
+    runs-on: ubuntu-latest
+    if: needs.check-ci.outputs.should-deploy == 'true'
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Update ECS task definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: .aws/ecs-task-definition.json
+          container-name: frontend
+          image: ${{ needs.build-image.outputs.image-uri }}
+
+      - name: Deploy to ECS (Staging)
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          cluster: playerledger-staging
+          service: frontend
+          wait-for-service-stability: true
+
+      - name: Verify staging health
+        run: |
+          export STAGING_URL="${{ secrets.STAGING_URL }}"
+          for i in {1..5}; do
+            if curl -sf "$STAGING_URL/api/health" > /dev/null; then
+              echo "Staging health check passed"
+              exit 0
+            fi
+            echo "Attempt $i/5 waiting"
+            sleep 10
+          done
+          echo "Staging health check failed"
+          exit 1
+
+  deploy-production:
+    needs: [check-ci, build-image, deploy-staging]
+    runs-on: ubuntu-latest
+    if: needs.check-ci.outputs.should-deploy == 'true'
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Update ECS task definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: .aws/ecs-task-definition.json
+          container-name: frontend
+          image: ${{ needs.build-image.outputs.image-uri }}
+
+      - name: Deploy to ECS (Production)
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          cluster: playerledger-production
+          service: frontend
+          wait-for-service-stability: true
+
+      - name: Verify production health
+        run: |
+          export PROD_URL="${{ secrets.PRODUCTION_URL }}"
+          for i in {1..5}; do
+            if curl -sf "$PROD_URL/api/health" > /dev/null; then
+              echo "Production health check passed"
+              exit 0
+            fi
+            echo "Attempt $i/5 waiting"
+            sleep 10
+          done
+          echo "Production health check failed"
+          exit 1
+
+  rollback-on-failure:
+    needs: [deploy-production]
+    runs-on: ubuntu-latest
+    if: failure()
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Get previous task definition and rollback
+        run: |
+          PREVIOUS_TASK_DEF=$(aws ecs describe-services \
+            --cluster playerledger-production \
+            --services frontend \
+            --query 'services[0].deployments[1].taskDefinition' \
+            --output text)
+
+          if [ -z "$PREVIOUS_TASK_DEF" ] || [ "$PREVIOUS_TASK_DEF" == "None" ]; then
+            echo "No previous task definition found; manual rollback required"
+            exit 0
+          fi
+
+          aws ecs update-service \
+            --cluster playerledger-production \
+            --service frontend \
+            --task-definition "$PREVIOUS_TASK_DEF"
+
+          echo "Rolled back to: $PREVIOUS_TASK_DEF"

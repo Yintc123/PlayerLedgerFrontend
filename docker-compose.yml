@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+    environment:
+      REDIS_AOF: 'yes'
+      REDIS_MAXMEMORY: '256mb'
+      REDIS_MAXMEMORY_POLICY: 'allkeys-lru'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - playerledger
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - '3000:3000'
+    environment:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: '1'
+      REDIS_URL: redis://redis:6379
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:3000
+      API_BASE_URL: http://api:8080
+      SESSION_TIMEOUT_MINUTES: '30'
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'wget', '--quiet', '--tries=1', '--spider', 'http://localhost:3000/api/health']
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - playerledger
+
+  # API server 服務（測試用）
+  api:
+    image: httpbin.org/httpbin
+    ports:
+      - '8080:80'
+    networks:
+      - playerledger
+
+volumes:
+  redis-data:
+
+networks:
+  playerledger:
+    driver: bridge
