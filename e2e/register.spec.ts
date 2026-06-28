@@ -13,7 +13,7 @@ test.describe('Register Flow', () => {
 
     await expect(page).toHaveURL('/register');
     await expect(page.getByLabel('帳號')).toBeVisible();
-    await expect(page.getByLabel('密碼')).toBeVisible();
+    await expect(page.getByLabel('密碼', { exact: true })).toBeVisible();
     await expect(page.getByLabel('確認密碼')).toBeVisible();
   });
 
@@ -23,7 +23,7 @@ test.describe('Register Flow', () => {
     await page.goto('/register');
 
     await page.getByLabel('帳號').fill('alice');
-    await page.getByLabel('密碼').fill('password123');
+    await page.getByLabel('密碼', { exact: true }).fill('password123');
     await page.getByLabel('確認密碼').fill('different456');
     await page.getByRole('button', { name: '建立帳號' }).click();
 
@@ -38,7 +38,7 @@ test.describe('Register Flow', () => {
 
     await page.goto('/register');
     await page.getByLabel('帳號').fill('newuser');
-    await page.getByLabel('密碼').fill('password123');
+    await page.getByLabel('密碼', { exact: true }).fill('password123');
     await page.getByLabel('確認密碼').fill('password123');
     await page.getByRole('button', { name: '建立帳號' }).click();
 
@@ -59,7 +59,7 @@ test.describe('Register Flow', () => {
 
     await page.goto('/register');
     await page.getByLabel('帳號').fill('existing');
-    await page.getByLabel('密碼').fill('password123');
+    await page.getByLabel('密碼', { exact: true }).fill('password123');
     await page.getByLabel('確認密碼').fill('password123');
     await page.getByRole('button', { name: '建立帳號' }).click();
 

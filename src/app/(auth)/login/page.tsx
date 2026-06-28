@@ -1,6 +1,9 @@
 'use client';
 
-import { FormEvent, useState, Suspense } from 'react';
+// force-dynamic: useSearchParams() reads query string at request time; skip static prerender
+export const dynamic = 'force-dynamic';
+
+import { FormEvent, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { CheckCircle2, Loader2, Wallet } from 'lucide-react';
@@ -148,9 +151,7 @@ export default function LoginPage() {
         aria-hidden="true"
         className="pointer-events-none absolute -bottom-32 -left-32 h-96 w-96 rounded-full bg-fuchsia-200/30 blur-3xl"
       />
-      <Suspense>
-        <LoginForm />
-      </Suspense>
+      <LoginForm />
       <p className="text-muted-foreground absolute bottom-6 text-xs">© PlayerLedger · 內部後台</p>
     </main>
   );
