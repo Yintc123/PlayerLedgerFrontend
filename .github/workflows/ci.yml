@@ -195,7 +195,7 @@ jobs:
         with:
           task-definition: ${{ steps.task-def.outputs.task-definition }}
           cluster: warmhearted-crocodile-18gqvo-jko-cluster
-          service: frontend
+          service: igs-frontend-service-irb2wn0c
           wait-for-service-stability: true
 
       - name: Verify staging health
