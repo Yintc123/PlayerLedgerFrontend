@@ -108,6 +108,7 @@ UI 元件全部沿用 `src/components/ui/{button,input,label,card,alert}.tsx`（
 | 帳號 label | `帳號` |
 | 密碼 label | `密碼` |
 | 確認密碼 label | `確認密碼` |
+| 密碼 helper text | `至少 8 字元，需含字母與數字` |
 | 提交按鈕（閒置） | `建立帳號` |
 | 提交按鈕（loading） | `建立中…`（U+2026） |
 | 返回登入 link | `已有帳號？返回登入` |
@@ -137,11 +138,13 @@ UI 元件全部沿用 `src/components/ui/{button,input,label,card,alert}.tsx`（
 
 | 欄位 | input 屬性 | client 端 UX 驗證 |
 |------|-----------|------------------|
-| 帳號 | `type="text"`、`autoComplete="username"`、`required` | trim 後 length ≥ 1（其餘交後端） |
-| 密碼 | `type="password"`、`autoComplete="new-password"`、`required` | length ≥ 8（**純 UX 提示**，不擋短密碼，由後端 `weak_password` 把關） |
+| 帳號 | `type="text"`、`autoComplete="username"`、`required`、`minLength={3}`、`maxLength={64}` | trim 後對齊後端 OpenAPI `minLength: 3, maxLength: 64`；其餘交後端 |
+| 密碼 | `type="password"`、`autoComplete="new-password"`、`required`、`minLength={8}`、`maxLength={256}` | length 8–256；強度規則「需含字母與數字」以 helper text 提示而非 client 端攔截（[`12 §5`](./12-cms-user-registration-domain.md#5-client--server-驗證職責劃分)） |
 | 確認密碼 | `type="password"`、`autoComplete="new-password"`、`required` | 與密碼欄位 `===` 比對 |
 
-> **client 不做的事**：不檢 email format、不檢 username 是否存在、不檢密碼複雜度規則——詳見 [`12 §5`](./12-cms-user-registration-domain.md#5-client--server-驗證職責劃分)。
+**密碼欄位 helper text**：在密碼欄位下方以 `muted` 樣式顯示「`至少 8 字元，需含字母與數字`」（對齊後端 `infrastructure.md §8.9` 弱密碼規則）。
+
+> **client 不做的事**：不檢 email format、不檢 username 是否存在、不檢密碼複雜度規則（client 不模擬 `weak_password` 邏輯）——詳見 [`12 §5`](./12-cms-user-registration-domain.md#5-client--server-驗證職責劃分)。
 
 ---
 
@@ -162,7 +165,7 @@ UI 元件全部沿用 `src/components/ui/{button,input,label,card,alert}.tsx`（
 - **不 auto-login**：成功後**不** call `/api/login`（[`12 §2.4`](./12-cms-user-registration-domain.md#2-註冊政策與資料模型)）
 - **不廣播 AuthChannel**：未建立 session 階段沒有東西可廣播
 - **不檢 session**：`/register` 是 PUBLIC path，proxy.ts 不會擋
-- **不顯示「已登入則跳走」**：使用者已登入時誤入 /register 仍可看到表單；submit 後若 session 有效，後端會回 `use_logout_instead`（[`12 §4`](./12-cms-user-registration-domain.md#4-後端-error-code-對應與顯示文案)），UI 走一般錯誤態
+- **不顯示「已登入則跳走」**：使用者已登入時誤入 `/register` 仍可看到表單；submit 後後端**不**會檢 session（`/auth/register` 為公開端點），通常會回 `username_taken`（已存在帳號）或正常建第二個帳號——UI 走一般 4xx 流程即可，無需特別 client-side guard
 
 ---
 
@@ -291,7 +294,8 @@ it('should redirect to /login?registered=true on 201 response')
 it('should render alert with backend message on 4xx')
 it('should map username_taken to "此帳號已被使用，請換一個"')
 it('should map "username taken" (space-form) to same message via normalizeErrorCode')
-it('should map weak_password to "密碼強度不足，請使用更強的密碼"')
+it('should map weak_password to "密碼強度不足；需至少 8 字元且同時含字母與數字"')
+it('should map invalid_client to "服務設定錯誤，請聯絡管理員"')
 it('should map invalid_input to "輸入格式不正確" when no message provided')
 it('should pass through backend message when error code is unknown')
 
@@ -342,7 +346,7 @@ E2E 須對 `/api/register` 走 mock 或對接後端 stub；不可 mock `lib/api-
 
 > 業務邏輯層的開放問題見 [`12 §10`](./12-cms-user-registration-domain.md#10-開放問題)。
 
-- [ ] **密碼強度視覺提示**：是否在輸入時即時顯示「弱／中／強」？v1 不做，由後端 `weak_password` 反應即可
-- [ ] **使用者已登入時誤入 /register**：v1 不特別處理（走後端 `use_logout_instead` 錯誤態）；UX 若反饋糟糕再加 client-side guard
+- [ ] **密碼強度視覺提示**：是否在輸入時即時顯示「弱／中／強」？v1 不做（helper text 已揭示「字母+數字」規則），由後端 `weak_password` 反應即可
+- [ ] **使用者已登入時誤入 /register**：v1 不特別處理（`/auth/register` 不檢 session，會視為新帳號建立或回 `username_taken`）；UX 若反饋糟糕再加 client-side `useSession` guard 並 redirect 到 `/dashboard`
 - [ ] **「建立帳號」按鈕 disabled 邏輯**：v1 永遠 enabled（依賴 HTML `required` + client confirm 比對 alert）；若 PM 要求「三欄都填了才 enable」需另寫
 - [ ] **註冊成功 banner 可關閉？** v1 不可關，整頁載入後自動消失；若需手動關（如 admin 反覆操作），加 X 按鈕
