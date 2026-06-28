@@ -12,19 +12,21 @@ vi.mock('@/lib/health/checks', () => ({
 
 const { GET } = await import('./route');
 
-function makeBody(
-  redis: 'ok' | 'error',
-  apiServer: 'ok' | 'error'
-): HealthResponse {
+function makeBody(redis: 'ok' | 'error', apiServer: 'ok' | 'error'): HealthResponse {
   const isHealthy = redis === 'ok' && apiServer === 'ok';
   return {
     status: isHealthy ? 'ok' : 'unhealthy',
     version: 'v1.2.3',
     timestamp: '2026-06-29T00:00:00.000Z',
     checks: {
-      redis: redis === 'ok' ? { status: 'ok', latencyMs: 1 } : { status: 'error', error: 'down', latencyMs: 2000 },
+      redis:
+        redis === 'ok'
+          ? { status: 'ok', latencyMs: 1 }
+          : { status: 'error', error: 'down', latencyMs: 2000 },
       apiServer:
-        apiServer === 'ok' ? { status: 'ok', latencyMs: 5 } : { status: 'error', error: 'HTTP 500', latencyMs: 50 },
+        apiServer === 'ok'
+          ? { status: 'ok', latencyMs: 5 }
+          : { status: 'error', error: 'HTTP 500', latencyMs: 50 },
     },
   };
 }
