@@ -1298,8 +1298,9 @@ export type IdleTimerOpts = {
 }
 
 export type IdleTimerHandle = {
-  /** 由 DOM activity 或 cross-tab 廣播觸發；自動 throttle 1s */
-  notifyActivity(at?: number): void
+  /** 由 DOM activity / cross-tab 廣播 / 「繼續工作」按鈕觸發；自動 throttle 1s。
+   *  via 標記延長來源（DOM/廣播 → 'activity'，按鈕 → 'click'），供 idle_extended 觀測。 */
+  notifyActivity(at?: number, via?: 'activity' | 'click'): void
   /** 由「立即登出」按鈕觸發；強制 onEvent({type:'expire',...}) 一次 */
   forceExpire(reason: 'manual'): void
   /** 解綁所有 timer，多次呼叫安全 */
@@ -1407,33 +1408,41 @@ export function IdleWarningModal(props: IdleWarningModalProps): JSX.Element | nu
 ### 5.5.3 演算法（含休眠 / 可見度 / abs_exp 邊界）
 
 ```
-初始狀態:
-  lastActivityAt = Date.now()
-  expiryAt       = lastActivityAt + IDLE_TIMEOUT_MS
-  warningShownAt = null
-  loggingOut     = false
+初始狀態（建構時不啟動 timer，第一次 notifyActivity 才排程）:
+  lastActivityAt   = Date.now()
+  expiryAt         = lastActivityAt + IDLE_TIMEOUT_MS
+  warningShownAt   = null
+  lastRescheduleAt = -Infinity        // throttle 錨點（首次必過）
+  loggingOut       = false
 
 事件 source（passive listener）:
   - DOM: mousemove / mousedown / keydown / wheel / touchstart / scroll
   - Cross-tab: auth-channel 'activity' 訊息
   - visibilitychange: 'visible' → 重新檢查（不算 activity）
 
-重置（throttle 1s）:
-  if (loggingOut) return
-  const now = Date.now()
-  if (now - lastActivityAt < 1000) return        // throttle
-  lastActivityAt = now
-  expiryAt       = now + IDLE_TIMEOUT_MS
+notifyActivity(at = now, via = 'activity'):     // throttle 只限「重排 + 廣播」，不限時間更新
+  if (loggingOut || disposed) return
+  const wasWarning = (warningShownAt !== null)
+  lastActivityAt = at                            // 永遠更新（wall-clock 精度），即使在 throttle 窗內
+  expiryAt       = at + IDLE_TIMEOUT_MS
+  if (wasWarning) { warningShownAt = null; onEvent({type:'extended', via}) }   // 開新 cycle
+  if (!wasWarning && at - lastRescheduleAt < 1000) return    // throttle：窗內不重排（pending timer 到點自我修正）
+  lastRescheduleAt = at
   reschedule()
-  authChannel.postActivity(now)                   // 跨分頁同步
+  // 廣播由 provider 層負責（同樣 throttle 1s）：authChannel.postActivity(at)
 
 reschedule():
+  if (loggingOut || disposed) return
   cancelTimer()
-  const remaining = effectiveExpiry() - Date.now()
+  const remaining = effectiveExpiry() - now()
   if (remaining <= 0)             { onExpire(); return }
-  if (remaining <= WARNING_MS)    { showWarning() }
-  // setTimeout 是觸發點，不依賴它計時；最大 ~25 天上限避免 32-bit 溢位
-  timer = setTimeout(reschedule, Math.min(remaining, MAX_SAFE_TIMEOUT))
+  if (remaining <= WARNING_MS) {
+    if (warningShownAt === null) { warningShownAt = now(); onEvent({type:'warning', remainingMs: remaining}) }
+    timer = setTimer(reschedule, Math.min(remaining, MAX_SAFE_TIMEOUT))          // 已在警告窗 → 排到 expiry
+  } else {
+    timer = setTimer(reschedule, Math.min(remaining - WARNING_MS, MAX_SAFE_TIMEOUT))  // 未進窗 → 排到「警告點」
+  }
+  // setTimer 只是「該重算了」的觸發點，不依賴它計時；MAX_SAFE_TIMEOUT 防 32-bit 溢位
 
 effectiveExpiry():
   return Math.min(expiryAt, absoluteExpiresAt)    // abs_exp short-circuit
@@ -1499,6 +1508,10 @@ sendLogout():
 | `BroadcastChannel` 不支援（如 Safari 舊版 / sandbox） | feature detect，若 undefined 則退化為「不跨分頁同步」；本地仍可運作 |
 
 ### 5.5.6 可觀測性必須 emit 的事件
+
+> **實作現況**：`IdleTimerProvider` 透過 `recordMetric(name, tags)` 發出三個事件,tags 對齊 spec 03 §2.5:
+> `idle_logout {userId, idleMs}`、`idle_warning {userId, idleMs, remainingMs}`、`idle_extended {userId, wayDismissed}`(`wayDismissed` 來自 timer 的 `extended.via`:DOM/廣播為 `'activity'`、「繼續」按鈕為 `'click'`)。
+> `recordMetric` 目前為 no-op stub（與其他畫面同階段);**結構化 client log 與 `/api/vitals` beacon 待觀測層接線時補上**（spec 03 §6.1）。
 
 | 事件 | log type | metric | 備註 |
 |------|---------|--------|------|
@@ -1605,7 +1618,10 @@ useEffect(() => {
 
 - **Idle timer 活動同步（重要 UX）**：idle timer **以「整個瀏覽器 session」為單位而非分頁**。任一分頁有 mousemove / keydown / click → 透過 `BroadcastChannel('auth')` 廣播 `{ type: 'activity', at: <ms> }`，所有分頁收到即重置自己的 idle timer。否則「A 分頁有人在用、B 分頁閒置 15 分鐘把所有人踢出」的 UX 不可接受
 - **Logout 廣播**：任一分頁登出 → 廣播 `{ type: 'logout' }`，其他分頁立即跳 login
+- **Warning 廣播**：任一分頁進入 30 秒警告 → 廣播 `{ type: 'warning' }`，其他分頁若也已逼近自身到期則同步顯示 modal（未逼近則忽略，避免提早彈窗）
 - **登入完成**：登入分頁廣播 `{ type: 'login' }`，其他分頁可依需求重新請求資料
+
+> **實作範圍**：`IdleTimerProvider`（受保護區段）負責廣播/接收 `activity`、`logout`、`warning`。`login` 廣播屬**登入流程**職責（登入頁不掛 idle provider），目前未實作；`auth-channel` 已提供 `postLogin` 與自家帳號過濾,待登入頁需要時接上即可。
 
 **為何選 BroadcastChannel 而非 `navigator.locks` / `localStorage` 事件**：
 
