@@ -4,6 +4,8 @@ import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest';
 import { SessionProvider, type ClientSession } from '@/lib/session/client-session';
 import { IdleTimerProvider } from './idle-timer-provider';
+import type { IdlePolicy } from '@/lib/idle';
+import * as uiMetrics from '@/lib/observability/ui-metrics';
 
 const MIN = 60_000;
 const IDLE = 15 * MIN;
@@ -43,10 +45,10 @@ function makeSession(overrides: Partial<ClientSession> = {}): ClientSession {
   };
 }
 
-function renderProvider(session: ClientSession = makeSession()) {
+function renderProvider(session: ClientSession = makeSession(), policyOverride?: IdlePolicy) {
   return render(
     <SessionProvider initialSession={session}>
-      <IdleTimerProvider>
+      <IdleTimerProvider policyOverride={policyOverride}>
         <button>child</button>
       </IdleTimerProvider>
     </SessionProvider>
@@ -178,6 +180,42 @@ describe('IdleTimerProvider — timing (fake timers)', () => {
     expect(replaceSpy).toHaveBeenCalledWith('/login?reason=idle_timeout');
     expect(fetch).toHaveBeenCalled();
   });
+
+  // 觀測欄位對齊 spec 03 §2.5（recordMetric 為專案既有 spy seam）
+  it('should record idle_logout metric with userId and idleMs', () => {
+    const spy = vi.spyOn(uiMetrics, 'recordMetric');
+    renderProvider();
+    act(() => vi.advanceTimersByTime(IDLE));
+    expect(spy).toHaveBeenCalledWith(
+      'auth.session.idle_logout',
+      expect.objectContaining({ userId: 'u-1', idleMs: expect.any(Number) })
+    );
+  });
+
+  it('should record idle_warning metric with userId, idleMs and remainingMs', () => {
+    const spy = vi.spyOn(uiMetrics, 'recordMetric');
+    renderProvider();
+    act(() => vi.advanceTimersByTime(IDLE - WARN));
+    expect(spy).toHaveBeenCalledWith(
+      'auth.session.idle_warning',
+      expect.objectContaining({
+        userId: 'u-1',
+        idleMs: IDLE - WARN,
+        remainingMs: expect.any(Number),
+      })
+    );
+  });
+
+  it('should record idle_extended metric with userId and wayDismissed="click" on 繼續', () => {
+    const spy = vi.spyOn(uiMetrics, 'recordMetric');
+    renderProvider();
+    act(() => vi.advanceTimersByTime(IDLE - WARN));
+    act(() => fireEvent.click(screen.getByRole('button', { name: /繼續/ })));
+    expect(spy).toHaveBeenCalledWith(
+      'auth.session.idle_extended',
+      expect.objectContaining({ userId: 'u-1', wayDismissed: 'click' })
+    );
+  });
 });
 
 describe('IdleTimerProvider — cross-tab (real timers)', () => {
@@ -206,6 +244,25 @@ describe('IdleTimerProvider — cross-tab (real timers)', () => {
     window.dispatchEvent(new Event('mousemove')); // provider 廣播自己的 activity
     await settle(); // 給 BroadcastChannel 充分交付時間，確認仍不導頁
     expect(replaceSpy).not.toHaveBeenCalled();
+  });
+
+  it('should broadcast warning to other tabs when the warning fires', async () => {
+    const raw = new BroadcastChannel('auth');
+    const got: Array<{ type: string }> = [];
+    raw.onmessage = (e) => got.push(e.data);
+    // 小 policy + real timers：警告 200ms 觸發、到期 800ms（充裕時間斷言廣播）
+    renderProvider(makeSession(), { idleTimeoutMs: 800, warningMs: 600 });
+    await waitFor(() => expect(got.some((m) => m.type === 'warning')).toBe(true));
+    raw.close();
+  });
+
+  it('should NOT show modal on inbound warning when this tab is far from its own warning', async () => {
+    renderProvider(makeSession(), { idleTimeoutMs: 60_000, warningMs: 1_000 }); // 遠離警告窗
+    const raw = new BroadcastChannel('auth');
+    raw.postMessage({ type: 'warning', at: Date.now(), nonce: 'other-warn' });
+    await new Promise<void>((r) => setTimeout(r, 80));
+    expect(screen.queryByRole('alertdialog')).toBeNull(); // 無提早彈窗副作用
+    raw.close();
   });
 
   it('should detach listeners on unmount (no broadcast after unmount)', async () => {

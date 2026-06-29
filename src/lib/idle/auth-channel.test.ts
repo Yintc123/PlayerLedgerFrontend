@@ -96,6 +96,25 @@ describe('createAuthChannel', () => {
     expect(onMessage).not.toHaveBeenCalled();
   });
 
+  it('should deliver a fresh warning broadcast from another tab', async () => {
+    const onMessage = vi.fn();
+    const ch = createAuthChannel({ onMessage });
+    cleanups.push(() => ch.dispose());
+    otherTab().post({ type: 'warning', at: 5, nonce: 'w-fresh' });
+    await tick();
+    expect(onMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'warning' }));
+  });
+
+  it('should drop warning whose at < own last broadcast warning at (§5.6 self-newer)', async () => {
+    const onMessage = vi.fn();
+    const ch = createAuthChannel({ onMessage });
+    cleanups.push(() => ch.dispose());
+    ch.postWarning(1000); // 本分頁已在 1000 顯示警告
+    otherTab().post({ type: 'warning', at: 500, nonce: 'w-stale' }); // 更舊
+    await tick();
+    expect(onMessage).not.toHaveBeenCalled();
+  });
+
   it('should release own-emission nonce after reasonable TTL (memory bound)', async () => {
     const onMessage = vi.fn();
     let clock = 0;
