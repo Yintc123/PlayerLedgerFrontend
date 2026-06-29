@@ -761,18 +761,19 @@ Build / push / deploy 的 workflow 完整 YAML 見 `cd.yml`，不在本 spec 範
 
 ## 9. 健康檢查端點
 
-> **設計變更（[ADR 012](../adr/012-health-probe-scope.md)）**：原本單一 `/api/health` 內聯檢查 Redis + 上游 API Server 的設計會造成連鎖故障（API Server 抖動 → BFF 全部被 ECS 替換）。改為兩個端點分離：
+> **設計變更（[ADR 022](../adr/022-health-liveness-readiness-split.md)，取代 [ADR 012](../adr/012-health-probe-scope.md) 的 shallow 設計）**：原 shallow `/api/health` 內聯 Redis ping 並交給 ECS Target Group，導致 Redis（ElastiCache）一抖整批 BFF task 同時被判 unhealthy 而替換，但**換 task 並修不好 Redis**，只是把容量churn 掉。改採 Kubernetes 慣例的三層探針，liveness 與所有依賴解耦：
 >
-> - **`/api/health`（shallow）**：只檢查 BFF 自身依賴（process + Redis），供 ECS Target Group 與 Docker HEALTHCHECK 使用
-> - **`/api/health/deep`**：額外檢查上游 API Server，供 CD smoke test、外部 uptime monitor、人為 dashboard 使用，**禁止放進 Target Group**
+> - **`/api/health`（liveness）**：**只**檢查 process 還能回應 HTTP，不查任何依賴，恆回 200。供 ECS Target Group 與 Docker HEALTHCHECK 使用。
+> - **`/api/health/ready`（readiness）**：檢查內部依賴 Redis。供 dashboard / 內部監控，**禁止放進 Target Group**——Redis 故障由 alarm 處理，不觸發 task 替換。
+> - **`/api/health/deep`**：readiness + 上游 API Server，供 CD smoke test、外部 uptime monitor、人為 dashboard，**禁止放進 Target Group**。
 
-### 9.1 `/api/health`（shallow，給 ECS 用）
+### 9.1 `/api/health`（liveness，給 ECS 用）
 
-**目的：** 反映「BFF 自身能不能服務」，不綁定上游狀態。
+**目的：** 反映「BFF process 自身還能不能服務」，**不綁定任何依賴**（含 Redis 與上游）。
 
 **端點：** `GET /api/health`（公開，須加入 `proxy.ts` 的 `PUBLIC_PATHS`）
 
-**回應（healthy）：**
+**回應（恆 healthy）：**
 
 ```http
 HTTP/1.1 200 OK
@@ -782,10 +783,31 @@ Cache-Control: no-store
 {
   "status": "ok",
   "version": "abc1234-20260628120000",
+  "timestamp": "2026-06-28T01:23:45.678Z"
+}
+```
+
+**檢查項目：** 無。process 能執行 handler 並回應，即視為 alive；恆回 200。回應**不含 `checks` 欄位**，明確表示未做任何依賴檢查。
+
+**為何不查 Redis（與 ADR 012 相反）：** liveness 唯一該偵測的故障是「process 卡死/無法回應」——此時 ECS 的 TCP/HTTP probe 自然逾時，無需 application 層協助。把 Redis 綁進 liveness 會讓 Redis 抖動觸發整批 task 替換，而替換對外部 ElastiCache 故障毫無幫助（詳見 [ADR 022](../adr/022-health-liveness-readiness-split.md)）。Redis 健康改由 §9.2 readiness 觀測。
+
+### 9.2 `/api/health/ready`（readiness，給監控用）
+
+**目的：** 反映「BFF 的內部依賴 Redis 是否可用」。失敗代表 session 功能降級，但 process 仍能服務登入頁等不需 session 的路徑。**不可供 ECS 自動替換用**。
+
+**端點：** `GET /api/health/ready`（公開，須加入 `PUBLIC_PATHS`）
+
+**回應（healthy）：**
+
+```http
+HTTP/1.1 200 OK
+Cache-Control: no-store
+
+{
+  "status": "ok",
+  "version": "abc1234-20260628120000",
   "timestamp": "2026-06-28T01:23:45.678Z",
-  "checks": {
-    "redis": { "status": "ok", "latencyMs": 1 }
-  }
+  "checks": { "redis": { "status": "ok", "latencyMs": 1 } }
 }
 ```
 
@@ -825,24 +847,24 @@ export const healthRedis = new Redis({
 **為何不用 `Promise.race(ping, setTimeout(2000))`：**
 - `Promise.race` 在 timeout 觸發後，背景的 `ping` 仍會繼續執行佔用 socket，直到 connect 自己超時（可能 30s+），造成 socket 堆積
 - ioredis 的 `commandTimeout` 會主動切斷該 command 並在 stream 上發 error，乾淨地釋放資源
-- 「Redis ping 在 30s 後才回 PONG」這種殭屍狀態，`Promise.race` 抓不到（因為 ping 最終會 resolve），ECS 會卡在「曾經 healthy」直到下次檢查
+- 「Redis ping 在 30s 後才回 PONG」這種殭屍狀態，`Promise.race` 抓不到（因為 ping 最終會 resolve）
 
-### 9.2 `/api/health/deep`（深度，給人類用）
+### 9.3 `/api/health/deep`（深度，給人類用）
 
 **目的：** 驗證整鏈路（BFF → Redis + BFF → API Server）。**不可供 ECS 自動替換用**。
 
 **端點：** `GET /api/health/deep`（公開，須加入 `PUBLIC_PATHS`）
 
-**回應結構：** 同 shallow（含 `version` / `timestamp` / `status`），但 `checks` 多一個 `apiServer` 欄位。`version` 由 `APP_VERSION` env 取（build 時 image tag），供 CD smoke test 驗證流量已切到新 task。
+**回應結構：** 同 readiness（含 `version` / `timestamp` / `status`），但 `checks` 多一個 `apiServer` 欄位。`version` 由 `APP_VERSION` env 取（build 時 image tag），供 CD smoke test 驗證流量已切到新 task。
 
 **檢查項目：**
 
 | 項目 | 操作 | timeout | 失敗判定 |
 |------|------|---------|---------|
-| `redis` | 同 shallow | 2s | 同 shallow（ioredis `commandTimeout`） |
+| `redis` | 同 readiness | 2s | 同 readiness（ioredis `commandTimeout`） |
 | `apiServer` | `GET ${API_BASE_URL}/health/ready` | 3s | 非 2xx 或網路錯誤；用 `AbortSignal.timeout(3000)`。**路徑為後端 root `/health/ready` 而非 `/api/health/ready`**——後端 ops 端點不在業務 path prefix 下（backend infrastructure.md §11），故**不**串 `API_BASE_PATH` |
 
-所有檢查並行（`Promise.allSettled`）。整體 endpoint 內部 timeout 不超過 4s（< ECS Target Group 5s timeout，但 deep 本來就不放 Target Group）。
+所有檢查並行（`Promise.allSettled`）。整體 endpoint 內部 timeout 不超過 4s。
 
 **回應 body 注意事項（防資訊洩漏）：**
 
@@ -850,35 +872,38 @@ export const healthRedis = new Redis({
 - **絕不**包含 `error.stack`、`error.cause`、`error.message`（後者可能含內部 hostname / 連線字串）
 - 對應測試見 §9.5
 
-### 9.3 為何 shallow 仍需包含 Redis（而非純 process-alive）
-
-純 process-alive 無法分辨「Node.js 程序活著但 Redis 掛了」的殭屍狀態。Redis 是 BFF 的**內部依賴**（同 VPC、無第二來源），失聯時 session 全壞，task 必須被替換才能讓 ECS 在新 AZ / 新節點重啟。API Server 不是內部依賴（跨服務、有獨立監控），所以不放 shallow。
-
 ### 9.4 ECS Target Group 設定
+
+**只打 liveness `/api/health`。** readiness / deep 一律**禁止**放進 Target Group。
 
 | 設定 | 值 | 理由 |
 |------|-----|------|
-| Path | `/api/health` | 對應 shallow 端點 |
+| Path | `/api/health` | 對應 liveness 端點（不含依賴檢查） |
 | Protocol | HTTP | container 內部 |
 | Healthy threshold | 2 | 連續 2 次成功才視為健康，避免單次抖動誤判 |
 | Unhealthy threshold | 3 | 連續 3 次失敗才視為不健康，容忍偶發網路抖動 |
-| Timeout | 5 秒 | 大於 endpoint 內部 timeout（2s） |
+| Timeout | 5 秒 | liveness 幾乎即時回應，5s 已極寬鬆 |
 | Interval | 30 秒 | AWS 預設，平衡靈敏度與成本 |
-| Success codes | `200` | 503 視為不健康 |
+| Success codes | `200` | liveness 恆 200；非 200 代表 process 真的無法服務 |
 
 ### 9.5 測試規格
 
 ```ts
-// app/api/health/route.test.ts（shallow）
+// app/api/health/route.test.ts（liveness）
+it('should return 200 (process is alive)')
+it('should NOT check Redis or upstream (liveness is dependency-free)')   // 對應 §9.1 解耦
+it('should set Cache-Control no-store to prevent stale health responses')
+it('should include version field equal to APP_VERSION env in the response body')   // §11.3 smoke verifies this
+
+// app/api/health/ready/route.test.ts（readiness）
 it('should return 200 when redis is reachable')
 it('should return 503 when redis ping fails')
 it('should timeout redis check after 2 seconds (ioredis commandTimeout fires)')
-it('should release the socket cleanly when ping times out')   // 對應 §9.1 殭屍 socket 反例
+it('should release the socket cleanly when ping times out')   // 對應 §9.2 殭屍 socket 反例
 it('should set Cache-Control no-store to prevent stale health responses')
 it('should NOT call upstream API server')
 it('should NOT include error.stack / error.cause / error.message in unhealthy response')   // 資訊洩漏
-it('should include version field equal to APP_VERSION env in the response body')   // §11.3 smoke verifies this
-it('should return 200 within 2s + small overhead (slo budget for ECS Target Group 5s)')
+it('should include version field equal to APP_VERSION env in the response body')
 
 // app/api/health/deep/route.test.ts（deep）
 it('should return 200 when both redis and apiServer are reachable')
@@ -887,7 +912,7 @@ it('should return 503 when apiServer health endpoint returns 5xx')
 it('should return mixed status (redis ok, apiServer fail) as 503 unhealthy')   // 混合失敗
 it('should run redis and apiServer checks in parallel (total time ≤ max of individual timeouts)')
 it('should timeout apiServer check after 3 seconds')
-it('should call apiServer at ${API_BASE_URL}/health/ready (root path, no API_BASE_PATH prefix)')   // §9.2 路徑
+it('should call apiServer at ${API_BASE_URL}/health/ready (root path, no API_BASE_PATH prefix)')   // §9.3 路徑
 it('should NOT include error.stack / error.cause / error.message in unhealthy response')
 ```
 
@@ -1210,7 +1235,7 @@ jobs:
           wait-for-minutes: 10
 
       - name: Smoke test
-        # 走 /api/health/deep 驗證整鏈路（含上游 API Server），ECS Target Group 用的是 shallow 版
+        # 走 /api/health/deep 驗證整鏈路（含上游 API Server），ECS Target Group 用的是 liveness 版
         # 同時驗證 deployed image 的 APP_VERSION 等於本次 deploy tag，避免 DNS/edge cache
         # 把流量導向舊 task（舊 task 也會回 200，但 version 是舊的）
         env:
@@ -1413,6 +1438,7 @@ Task definition 以版本控制管理,範本檔案放在 `deploy/task-definition
 - [ADR 009 - Rate Limiting 實作層](../adr/009-rate-limiting-strategy.md)
 - [ADR 010 - 對齊後端 ADR 007 JWT 變更](../adr/010-align-with-backend-adr007-jwt.md)
 - [ADR 011 - 邊緣安全強化（XFF 信賴 + login fail-closed）](../adr/011-edge-security-hardening.md)
+- [ADR 022 - 健康檢查改三層：liveness / readiness / deep](../adr/022-health-liveness-readiness-split.md)（取代 ADR 012 的 shallow 設計）
 - [ADR 012 - 健康檢查端點 shallow / deep 分離](../adr/012-health-probe-scope.md)
 - [ADR 013 - CSRF 防護策略（SameSite=Lax + Origin Check）](../adr/013-csrf-defense-strategy.md)
 - [後端 ADR 007 - Refresh Token Rotation 與重放偵測](../../PlayerLedgerBackend/docs/adr/007-refresh-token-rotation-and-replay-detection.md)

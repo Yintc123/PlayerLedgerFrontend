@@ -180,13 +180,17 @@ aws cloudwatch put-metric-alarm \
 
 ### 健康檢查
 
-- **淺層檢查** (ECS Target Group): `GET /api/health`
-  - 檢查 Redis 連線
-  - 快速失敗（2s 超時）
+- **存活檢查 / liveness** (ECS Target Group, Docker HEALTHCHECK): `GET /api/health`
+  - 只證明 process 還能服務，**不檢查任何依賴**，恆回 200（ADR 022）
+  - Redis 抖動不會觸發 ECS 替換 task
 
-- **深層檢查** (監控): `GET /api/health/deep`
+- **就緒檢查 / readiness** (內部監控 / dashboard): `GET /api/health/ready`
+  - 檢查 Redis 連線，快速失敗（2s 超時）
+  - **禁止**設為 ECS Target Group health check
+
+- **深層檢查** (監控 / CD smoke test): `GET /api/health/deep`
   - 檢查 Redis + 上游 API Server
-  - 用於詳細診斷
+  - 用於詳細診斷；**禁止**放進 Target Group
 
 ## 故障排除
 

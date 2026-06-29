@@ -8,7 +8,7 @@ export type HealthCheckResult = {
   latencyMs: number;
 };
 
-// Redis 檢查（shallow 用）
+// Redis 檢查（readiness / deep 用）
 export async function checkRedis(): Promise<HealthCheckResult> {
   const startTime = Date.now();
   try {
@@ -71,11 +71,26 @@ export type HealthResponse = {
   status: 'ok' | 'unhealthy';
   version?: string;
   timestamp: string;
-  checks: Record<string, HealthCheckResult>;
+  // liveness 不查任何依賴，故無 checks；readiness / deep 才有
+  checks?: Record<string, HealthCheckResult>;
 };
 
-// Shallow health check（給 ECS Target Group）
-export async function getShallowHealth(): Promise<HealthResponse> {
+// Liveness（給 ECS Target Group / Docker HEALTHCHECK）
+// 只證明 Node.js process 還活著、event loop 還能回應 HTTP，不查任何依賴。
+// 刻意與 Redis 解耦：Redis 抖動不應觸發 ECS 連鎖替換 task（ADR 022 取代 ADR 012 的 shallow 設計）。
+// 永遠回 200；process 真的死掉時根本無法回應，ECS 自會判定 unhealthy。
+export function getLiveness(): HealthResponse {
+  return {
+    status: 'ok',
+    version: process.env.APP_VERSION,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+// Readiness（給內部依賴監控 / dashboard）
+// 檢查 BFF 的內部依賴 Redis。失敗 → 503，但**不**供 ECS Target Group 使用，
+// 故不觸發 task 替換；改由 `health.readiness.failure` metric + alarm 處理（spec 03 §3.3）。
+export async function getReadiness(): Promise<HealthResponse> {
   const checks = {
     redis: await checkRedis(),
   };

@@ -87,7 +87,7 @@ USER nextjs
 
 EXPOSE 3000
 
-# HEALTHCHECK：下載 body 並 grep "status":"ok"，對應 spec 01 §9.1 的 response shape
+# HEALTHCHECK：打 liveness /api/health（不含 Redis；ADR 022），grep "status":"ok"，對應 spec 01 §9.1 response shape
 # 不用 wget --spider：busybox wget --spider 在 HTTP 4xx 仍 exit 0（路由失誤時假綠燈）
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD wget -q -O- "http://127.0.0.1:${PORT}/api/health" 2>/dev/null \
