@@ -4,6 +4,7 @@ import { SESSION_COOKIE_NAME } from '@/lib/session/cookie';
 import { verifySession } from '@/lib/session/session';
 import { decodeAccessToken, type TokenClaims } from '@/lib/auth/decode-token';
 import { SessionProvider, type ClientSession } from '@/lib/session/client-session';
+import { IdleTimerProvider } from '@/components/idle-timer-provider';
 import { CmsShell } from './_components/cms-shell';
 
 /**
@@ -49,7 +50,9 @@ export default async function CMSLayout({ children }: { children: React.ReactNod
 
   return (
     <SessionProvider initialSession={clientSession}>
-      <CmsShell>{children}</CmsShell>
+      <IdleTimerProvider>
+        <CmsShell>{children}</CmsShell>
+      </IdleTimerProvider>
     </SessionProvider>
   );
 }
