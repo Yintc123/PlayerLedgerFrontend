@@ -1,56 +1,51 @@
 /**
- * searchPlayers — 玩家搜尋（spec 05 §4）。
+ * searchPlayers — 玩家搜尋（GET /api/cms/players，對齊 spec 05 §3 / §4）。
  *
- * **Mock 實作**：後端就緒前以記憶體資料模擬。真實版會走 BFF 呼叫上游 GET
- * /players/search 並解開 envelope；介面（input/output 型別）維持不變，
- * 之後抽換內部即可，呼叫端（page.tsx）不需改。
+ * 真實串接：經 `cmsRequest`（帶 session access token + trace）呼叫後端，keyset cursor
+ * 分頁（`cursor`/`next_cursor`/`limit`，無 meta）。BFF 對輸入的唯一處理是 **trim + 丟空欄位**；
+ * 所有語意正規化（lowercase email、NFC 暱稱、E.164 手機）由後端執行（§3.1）。
  */
 import { ApiError } from '@/lib/api/errors';
-import { MOCK_PLAYERS, errorTriggerFor } from '@/lib/mock/dataset';
-import type { Player, PlayerSearchQuery, PlayerSearchResult } from './types';
+import { cmsRequest } from '@/lib/api-client/cms';
+import { toPlayer, type RawPlayerSearchResult } from './transform';
+import type { PlayerSearchQuery, PlayerSearchResult } from './types';
 
 const DEFAULT_LIMIT = 20;
 
-function matches(player: Player, query: PlayerSearchQuery): boolean {
-  const conds: boolean[] = [];
-  if (query.playerId) conds.push(player.playerId === query.playerId.trim());
-  if (query.externalId) conds.push(player.externalId === query.externalId.trim());
-  if (query.displayName) conds.push(player.displayName.startsWith(query.displayName.trim())); // 前綴模糊
-  if (query.email)
-    conds.push((player.email ?? '').toLowerCase().includes(query.email.trim().toLowerCase()));
-  if (query.phone)
-    conds.push(
-      (player.phone ?? '').replace(/[\s()-]/g, '').includes(query.phone.replace(/[\s()-]/g, ''))
-    );
-  // AND 組合：所有提供的欄位都須滿足
-  return conds.length > 0 && conds.every(Boolean);
+/** trim 後丟空欄位；camelCase 搜尋欄位 → 後端 snake_case query param。 */
+function toBackendParams(query: PlayerSearchQuery): URLSearchParams {
+  const sp = new URLSearchParams();
+  const fields: Array<[string, string | undefined]> = [
+    ['player_id', query.playerId],
+    ['external_id', query.externalId],
+    ['display_name', query.displayName],
+    ['email', query.email],
+    ['phone', query.phone],
+  ];
+  for (const [key, value] of fields) {
+    const trimmed = value?.trim();
+    if (trimmed) sp.set(key, trimmed);
+  }
+  if (query.cursor) sp.set('cursor', query.cursor); // opaque：原樣透傳，不解析
+  sp.set('limit', String(query.limit ?? DEFAULT_LIMIT)); // 上限交後端驗證，不 client clamp
+  return sp;
 }
 
 export async function searchPlayers(query: PlayerSearchQuery): Promise<PlayerSearchResult> {
-  // 手動 demo 用錯誤觸發
-  const trigger =
-    errorTriggerFor(query.playerId) ??
-    errorTriggerFor(query.externalId) ??
-    errorTriggerFor(query.displayName) ??
-    errorTriggerFor(query.email) ??
-    errorTriggerFor(query.phone);
-  if (trigger) throw trigger;
-
-  const hasField = Boolean(
-    query.playerId || query.externalId || query.displayName || query.email || query.phone
+  const searchParams = toBackendParams(query);
+  // 至少一個搜尋欄位（§3.2）；省一次往返，後端全空亦回 400 invalid input
+  const hasSearchField = ['player_id', 'external_id', 'display_name', 'email', 'phone'].some((k) =>
+    searchParams.has(k)
   );
-  if (!hasField) {
+  if (!hasSearchField) {
     throw new ApiError(400, 'invalid_input', '至少提供一個搜尋欄位');
   }
 
-  const limit = query.limit ?? DEFAULT_LIMIT;
-  const offset = query.cursor ? Number(Buffer.from(query.cursor, 'base64url').toString()) || 0 : 0;
+  const { data } = await cmsRequest<RawPlayerSearchResult>('/cms/players', { searchParams });
 
-  const all = MOCK_PLAYERS.filter((p) => matches(p, query));
-  const page = all.slice(offset, offset + limit);
-  const nextOffset = offset + limit;
-  const nextCursor =
-    nextOffset < all.length ? Buffer.from(String(nextOffset)).toString('base64url') : null;
-
-  return { players: page, nextCursor };
+  // 防禦性解構（§4.4）：後端異常回 data:null / 缺 players 時不以 TypeError 蓋掉真錯誤
+  return {
+    players: (data?.players ?? []).map(toPlayer),
+    nextCursor: data?.next_cursor ?? null,
+  };
 }
