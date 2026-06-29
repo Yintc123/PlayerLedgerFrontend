@@ -1,0 +1,1269 @@
+openapi: 3.1.0
+info:
+  title: PlayerLedger Backend API
+  version: 1.13.0
+  description: |
+    PlayerLedger Backend HTTP API。
+    完整認證設計見 [ADR 007](../docs/adr/007-refresh-token-rotation-and-replay-detection.md)。
+
+    **認證模型**：純 JWT，不走 cookie。Access token 走 `Authorization: Bearer`，refresh token 走 request body。
+    Refresh token 採 family-based rotation + replay detection + 10 秒 grace window。
+
+    **路徑前綴**：所有端點統一無版本號，base URL 為 `/api`（v1.12 起移除 `/api/v1`；內部 + 對外端點皆不做版本隔離）。
+
+servers:
+  - url: http://localhost:8080/api
+    description: 本地開發
+  - url: https://api.example.com/api
+    description: 正式環境
+
+tags:
+  - name: auth
+    description: 認證、token 換發、session 管理
+  - name: deposit-records
+    description: 儲值紀錄管理（CMS 後台 + 玩家自助查詢）
+  - name: cms-users
+    description: CMS 內部人員管理（讀 / 改 / 軟刪 / 自助改密碼）
+  - name: players
+    description: 玩家查詢（CMS 後台唯讀；搜尋 + 詳情，PII 依角色遮罩）
+
+security:
+  - bearerAuth: []
+
+paths:
+  # =============================================================
+  # Authentication
+  # =============================================================
+  /auth/register:
+    post:
+      tags: [auth]
+      summary: CMS 自註冊（建立 CMS user，預設 role=user）
+      description: |
+        僅 `client_id == "cms-web"` 接受，其餘回 400 `invalid_client`。
+        註冊成功**不簽 token**，前端必須再打一次 `/auth/login` 取得 access + refresh token。
+        詳見 infrastructure.md §8.9。
+
+        弱密碼規則：min 8 字元，至少含一個字母與一個數字。違反 → 422 `weak_password`。
+      operationId: register
+      security: []  # 公開 endpoint
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: 建立成功（無 body；caller 須另打 /auth/login）
+        '400':
+          description: 請求格式錯，或 client_id 不在允許清單
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalid_input:
+                  summary: validation 失敗
+                  value:
+                    success: false
+                    request_id: 0193b3f4-1234-7abc-9def-0123456789ab
+                    error: invalid input
+                invalid_client:
+                  summary: client_id != "cms-web"
+                  value:
+                    success: false
+                    request_id: 0193b3f4-1234-7abc-9def-0123456789ab
+                    error: invalid_client
+        '409':
+          description: username 已被同表佔用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                username_taken:
+                  value:
+                    success: false
+                    request_id: 0193b3f4-1234-7abc-9def-0123456789ab
+                    error: username_taken
+        '422':
+          description: 弱密碼
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                weak_password:
+                  value:
+                    success: false
+                    request_id: 0193b3f4-1234-7abc-9def-0123456789ab
+                    error: weak_password
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: 帳密登入，簽發 access + refresh token，建立新 family
+      operationId: login
+      security: []  # 公開 endpoint
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: 登入成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPairEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: 帳密錯誤
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalid_credentials:
+                  value:
+                    success: false
+                    request_id: 0193b3f4-1234-7abc-9def-0123456789ab
+                    error: unauthorized
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: 用 refresh token 換新的 access + refresh token（rotation）
+      description: |
+        每次成功 rotation 後 server 會在 10 秒 grace window 內接受同 jti 重送（網路重試），
+        超過 window 或 jti 不符 current → 觸發重放偵測，整 family 廢棄並寫 audit log。
+
+        **前端必須**：refresh 失敗一律走 login 流程，**不可自動重試**，
+        否則會誤觸 replay 偵測導致使用者被踢。
+      operationId: refresh
+      security: []  # 用 refresh token 自我認證
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: rotation 成功；或 grace window 命中後重簽等價 token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPairEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: refresh token 無效；error 字串細分以利前端區分行為
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                token_expired:
+                  summary: refresh token exp 超過 → 走 login
+                  value:
+                    success: false
+                    request_id: 0193b3f4-1234-7abc-9def-0123456789ab
+                    error: token_expired
+                absolute_expired:
+                  summary: family abs_exp 超過 → 強制 login
+                  value:
+                    success: false
+                    request_id: 0193b3f4-1234-7abc-9def-0123456789ab
+                    error: absolute_expired
+                invalid_token:
+                  summary: 簽章 / iss / aud 等驗證失敗
+                  value:
+                    success: false
+                    request_id: 0193b3f4-1234-7abc-9def-0123456789ab
+                    error: invalid_token
+                replay_detected:
+                  summary: 偵測到重放，family 已廢；UI 應提示「異常登入」
+                  value:
+                    success: false
+                    request_id: 0193b3f4-1234-7abc-9def-0123456789ab
+                    error: replay_detected
+                session_not_found:
+                  summary: family 已被廢 / 已過期
+                  value:
+                    success: false
+                    request_id: 0193b3f4-1234-7abc-9def-0123456789ab
+                    error: session_not_found
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: 登出當前裝置（廢掉 access token 對應的 family）
+      operationId: logout
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LogoutRequest'
+      responses:
+        '204':
+          description: 登出成功
+        '400':
+          description: refresh_token 簽章 / iss / aud / exp 失敗，或 fid 與 access token 不一致
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                fid_mismatch:
+                  summary: refresh_token.fid != access_token.fid（同 user 不同 family；應改用 /auth/sessions/{fid}）
+                  value:
+                    success: false
+                    request_id: 0193b3f4-1234-7abc-9def-0123456789ab
+                    error: invalid input
+                invalid_refresh:
+                  summary: 提供的 refresh_token 簽章 / 結構錯
+                  value:
+                    success: false
+                    request_id: 0193b3f4-1234-7abc-9def-0123456789ab
+                    error: invalid input
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/sessions:
+    get:
+      tags: [auth]
+      summary: 列出我目前所有登入裝置（family 清單）
+      description: 採 lazy cleanup，回傳實際存活的 family（孤兒 fid 會順手清掉）。
+      operationId: listSessions
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionListEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/sessions/{fid}:
+    delete:
+      tags: [auth]
+      summary: 撤銷指定裝置（在裝置清單頁按「登出此裝置」）
+      description: 不允許撤銷自己當前的 family（請改用 `/auth/logout`）。
+      operationId: revokeSession
+      parameters:
+        - name: fid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: 要撤銷的 family id
+      responses:
+        '204':
+          description: 撤銷成功
+        '400':
+          description: 不能撤銷自己
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                use_logout_instead:
+                  value:
+                    success: false
+                    request_id: 0193b3f4-1234-7abc-9def-0123456789ab
+                    error: use_logout_instead
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /auth/sessions/revoke-all:
+    post:
+      tags: [auth]
+      summary: 全裝置登出（廢掉自己所有 family，含當前裝置）
+      description: 適用於改密碼後一鍵全裝置登出、或察覺帳號異常時的緊急動作。
+      operationId: revokeAllSessions
+      responses:
+        '204':
+          description: 全部撤銷成功
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # =============================================================
+  # Deposit Records — CMS 端
+  # 權限：utype == cms。POST 限 admin+user；PATCH 限 admin；GET 全 CMS staff。
+  # =============================================================
+  /cms/deposit-records:
+    post:
+      tags: [deposit-records]
+      summary: 建立儲值紀錄（admin / user）
+      description: |
+        建立一筆儲值紀錄，初始 status 固定為 `pending`。
+        `player_name`（從 members 查）、`operator_id`（token）、`operator_ip`（ClientIP）由 server 填入，caller 不得指定。
+      operationId: createDepositRecord
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDepositRequest'
+      responses:
+        '201':
+          description: 建立成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepositRecordEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: player_id 不存在於 members 表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                not_found:
+                  value:
+                    success: false
+                    request_id: 0193b3f4-1234-7abc-9def-0123456789ab
+                    error: resource not found
+        '409':
+          description: reference_no 已被其他紀錄使用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                conflict:
+                  value:
+                    success: false
+                    request_id: 0193b3f4-1234-7abc-9def-0123456789ab
+                    error: resource already exists
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    get:
+      tags: [deposit-records]
+      summary: 列出儲值紀錄（全 CMS staff，分頁 + 篩選）
+      operationId: listDepositRecords
+      parameters:
+        - { name: page,           in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: page_size,      in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: player_id,      in: query, schema: { type: string, format: uuid } }
+        - name: status
+          in: query
+          description: 可重複出現做 OR 篩選（?status=pending&status=failed）
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/DepositStatus'
+        - name: payment_method
+          in: query
+          description: 可重複出現做 OR 篩選
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/PaymentMethod'
+        - { name: start_date, in: query, schema: { type: string, format: date }, description: 'created_at >= start_date 00:00:00 UTC' }
+        - { name: end_date,   in: query, schema: { type: string, format: date }, description: 'created_at <= end_date 23:59:59 UTC；不可早於 start_date' }
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [created_at, -created_at, amount, -amount]
+            default: -created_at
+      responses:
+        '200':
+          description: 查詢成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepositRecordListEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /cms/deposit-records/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags: [deposit-records]
+      summary: 取單筆儲值紀錄（全 CMS staff）
+      operationId: getDepositRecord
+      responses:
+        '200':
+          description: 查詢成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepositRecordEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    patch:
+      tags: [deposit-records]
+      summary: 更新狀態 / 備註（僅 admin）
+      description: |
+        備註欄位採**三態語意**：傳值=設定、傳 `null`=清空、欄位缺席=不修改。
+        至少需提供 `status`、`internal_note`、`display_note` 其中之一。
+        非法 status 轉換回 422 `invalid_transition`（合法轉換見 model §4）。
+        並發更新採 last-write-wins。
+      operationId: updateDepositRecord
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDepositRequest'
+      responses:
+        '200':
+          description: 更新成功，回傳更新後 record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepositRecordEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: 非法 status 轉換
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalid_transition:
+                  value:
+                    success: false
+                    request_id: 0193b3f4-1234-7abc-9def-0123456789ab
+                    error: invalid_transition
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  # =============================================================
+  # Players — 玩家查詢（players-api.md）
+  # 權限：utype == cms，全 CMS staff（admin/user/viewer）可讀；viewer 的 email/phone 遮罩。
+  # 唯讀；搜尋採 keyset cursor（非 page/page_size）。
+  # =============================================================
+  /cms/players:
+    get:
+      tags: [players]
+      summary: 搜尋玩家（全 CMS staff；viewer PII 遮罩）
+      description: |
+        依條件搜尋玩家，至少需提供一個搜尋條件（player_id / external_id / display_name / email / phone），
+        全空 → 400 `invalid input`。多條件以 AND 組合。
+        分頁採 keyset cursor（`cursor` opaque，底層為 `(created_at, id)`），回傳 `next_cursor`，無 `meta`。
+        viewer 角色的 `email` / `phone` 會被遮罩；admin / user 為完整值。
+      operationId: searchPlayers
+      parameters:
+        - { name: player_id,    in: query, schema: { type: string, format: uuid }, description: 精確比對 }
+        - { name: external_id,  in: query, schema: { type: string, maxLength: 64 }, description: 精確比對 }
+        - { name: display_name, in: query, schema: { type: string, maxLength: 64 }, description: 前綴（大小寫不敏感、NFC 正規化） }
+        - { name: email,        in: query, schema: { type: string, maxLength: 255 }, description: '前綴比對（lowercase）。定案語意見 players-api.md §4.1' }
+        - { name: phone,        in: query, schema: { type: string, maxLength: 32 }, description: '正規化後精確比對（canonical E.164）' }
+        - { name: cursor,       in: query, schema: { type: string }, description: 'opaque keyset cursor；綁定當次搜尋條件，變更條件須重置。缺省為第一頁' }
+        - { name: limit,        in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
+      responses:
+        '200':
+          description: 查詢成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlayerSearchResultEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /cms/players/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags: [players]
+      summary: 取玩家詳情（全 CMS staff；viewer PII 遮罩）
+      operationId: getPlayer
+      responses:
+        '200':
+          description: 查詢成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlayerEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  # =============================================================
+  # CMS Users — 內部人員管理（cms-users-api.md）
+  # 權限：utype == cms。GET 全 CMS staff；PATCH/DELETE :id 限 admin；PATCH /me 自己。
+  # =============================================================
+  /cms/users:
+    get:
+      tags: [cms-users]
+      summary: 列出 CMS users（全 CMS staff，分頁 + 篩選）
+      operationId: cmsListUsers
+      parameters:
+        - { name: page,            in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: page_size,       in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - name: role
+          in: query
+          description: 可重複出現做 OR 篩選（?role=admin&role=user）
+          schema: { type: array, items: { type: string, enum: [admin, user, viewer] } }
+          style: form
+          explode: true
+        - { name: username_like,   in: query, schema: { type: string, minLength: 2 }, description: 子字串模糊比對，最少 2 字元 }
+        - { name: include_deleted, in: query, description: "僅 admin 有效；non-admin 傳了靜默忽略", schema: { type: boolean, default: false } }
+        - { name: sort,            in: query, schema: { type: string, enum: ["created_at", "-created_at", "username", "-username"], default: "-created_at" } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CMSUserListEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /cms/users/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags: [cms-users]
+      summary: 取單筆 CMS user（全 CMS staff）
+      operationId: cmsGetUser
+      parameters:
+        - { name: include_deleted, in: query, description: "僅 admin 有效", schema: { type: boolean, default: false } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CMSUserResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [cms-users]
+      summary: 更新 username / role（僅 admin）
+      description: |
+        部分更新；缺欄位代表不改，至少需提供一個欄位。
+        role 變更時自動 revoke target 所有 session（強制重登）。
+        不可降級最後一個 admin（422 `last_admin_lockout`）；不可改自己的 role（422 `cannot_change_own_role`）。
+      operationId: cmsUpdateUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false   # 嚴格擋未知欄位
+              minProperties: 1              # 至少改一個欄位
+              properties:
+                username: { type: string, minLength: 3, maxLength: 64 }
+                role:     { type: string, enum: [admin, user, viewer] }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CMSUserResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+    delete:
+      tags: [cms-users]
+      summary: 軟刪除 CMS user（僅 admin）
+      description: |
+        軟刪除並自動 revoke target 所有 session。
+        不可刪最後一個 admin（422 `last_admin_lockout`）；不可刪自己（422 `cannot_delete_self`）。
+        對已軟刪除帳號重複 DELETE 回 404（idempotency 行為，見規格 §4.4）。
+      operationId: cmsDeleteUser
+      responses:
+        '204':
+          description: Deleted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /cms/users/me:
+    patch:
+      tags: [cms-users]
+      summary: 自助更新 username / password（不可改 role）
+      description: |
+        改密碼時 `current_password` 必填且須驗正確（否則 401 `current_password_mismatch`）。
+        `role` 欄位被 `additionalProperties: false` 擋下（INV-4）。
+      operationId: cmsUpdateSelf
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false   # 嚴格擋未知欄位（特別擋 role：INV-4）
+              minProperties: 1
+              properties:
+                username:         { type: string, minLength: 3, maxLength: 64 }
+                current_password: { type: string, minLength: 1, maxLength: 256, format: password }
+                new_password:     { type: string, minLength: 8, maxLength: 256, format: password }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CMSUserResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: 未登入 / 改密碼但 current_password 錯
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  # =============================================================
+  # Deposit Records — 玩家端（走 /api global servers）
+  # 權限：utype == member；player_id 由 token claims.sub 決定，不可指定。
+  # =============================================================
+  /me/deposit-records:
+    get:
+      tags: [deposit-records]
+      summary: 玩家查自己的儲值紀錄
+      description: |
+        `player_id` 從 access token `claims.sub`（= `members.id`）自動取得，caller 不可指定，
+        確保資料隔離。固定按 `-created_at` 排序，不開放 sort 控制。
+      operationId: listMyDepositRecords
+      parameters:
+        - { name: page,       in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: page_size,  in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 20 }, description: 上限 50（低於 CMS 端，降低大量拉取風險） }
+        - { name: start_date, in: query, schema: { type: string, format: date } }
+        - { name: end_date,   in: query, schema: { type: string, format: date }, description: 不可早於 start_date }
+      responses:
+        '200':
+          description: 查詢成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepositRecordPublicListEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+# =============================================================
+# Reusable components
+# =============================================================
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Access token JWT（HS256）。簽章後內含 `iss`、`sub`、`utype`、`role`、`fid`、`aud`、`exp`、`iat`、`jti`。
+        每 15 分鐘過期，前端用 refresh token 自動換發。
+
+  schemas:
+    # ---- 認證請求 ----
+    ClientID:
+      type: string
+      description: 區分前端類型，server 對照 ClientPolicies 取不同 TTL。
+      enum:
+        - cms-web
+        - public-web
+        - ios-app
+        - android-app
+
+    RegisterRequest:
+      type: object
+      required: [username, password, client_id]
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 64
+          description: CMS user 帳號；同表內 unique（軟刪除排除）
+        password:
+          type: string
+          minLength: 8
+          maxLength: 256
+          format: password
+          description: |
+            弱密碼規則：min 8 字元，至少含一個字母與一個數字。
+            違反 → 422 `weak_password`。
+        client_id:
+          allOf:
+            - $ref: '#/components/schemas/ClientID'
+          description: 必須為 `cms-web`，其餘 → 400 `invalid_client`
+
+    LoginRequest:
+      type: object
+      required: [username, password, client_id]
+      properties:
+        username:
+          type: string
+          minLength: 1
+          maxLength: 128
+        password:
+          type: string
+          minLength: 1
+          maxLength: 256
+          format: password
+        client_id:
+          $ref: '#/components/schemas/ClientID'
+
+    RefreshRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token:
+          type: string
+          description: 上一次 login / refresh 取得的 refresh token JWT
+          minLength: 1
+
+    LogoutRequest:
+      type: object
+      description: 可選；提供時驗證 refresh token 與 access token 的 fid 一致才登出
+      properties:
+        refresh_token:
+          type: string
+
+    # ---- 通用成功 envelope ----
+    # 所有成功回應一律包在此 envelope 內，對齊 infrastructure §10 的 Response[T] / OK()/OKList()。
+    # 每個端點以 allOf 引入此 envelope 並覆寫 data 為實際資料型別。
+    SuccessEnvelope:
+      type: object
+      required: [success, request_id, data]
+      properties:
+        success:
+          type: boolean
+          enum: [true]
+        request_id:
+          type: string
+          description: 對應 server log 與 audit log；客服回報請提供
+        data:
+          description: 端點特定的資料；以 allOf 覆寫實際型別
+        meta:
+          $ref: '#/components/schemas/PageMeta'
+      additionalProperties: false
+
+    PageMeta:
+      type: object
+      required: [page, page_size, total]
+      properties:
+        page:
+          type: integer
+          format: int32
+          minimum: 1
+        page_size:
+          type: integer
+          format: int32
+          minimum: 1
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+
+    # ---- 認證回應 ----
+    TokenPair:
+      type: object
+      required: [access_token, refresh_token, token_type, expires_in, refresh_expires_in]
+      properties:
+        access_token:
+          type: string
+          description: HS256 簽署的 JWT；放 Authorization header
+        refresh_token:
+          type: string
+          description: HS256 簽署的 JWT；下次 refresh 放 body
+        token_type:
+          type: string
+          enum: [Bearer]
+        expires_in:
+          type: integer
+          format: int32
+          description: access_token 有效秒數（= JWTConfig.AccessTTL）
+          example: 900
+        refresh_expires_in:
+          type: integer
+          format: int32
+          description: refresh_token 有效秒數（= ClientPolicy.RefreshTTL）
+          example: 3600
+
+    TokenPairEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/TokenPair'
+
+    SessionInfo:
+      type: object
+      required: [fid, client_id, device_label, ip_at_login, created_at, last_rotated_at, is_current]
+      properties:
+        fid:
+          type: string
+          format: uuid
+        client_id:
+          $ref: '#/components/schemas/ClientID'
+        device_label:
+          type: string
+          description: 從 User-Agent 解析的人類可讀標籤（如 "Chrome 120 on macOS"）
+          example: Chrome 120 on macOS
+        ip_at_login:
+          type: string
+          example: 192.0.2.1
+        created_at:
+          type: string
+          format: date-time
+        last_rotated_at:
+          type: string
+          format: date-time
+        is_current:
+          type: boolean
+          description: 此 family 是否為當前 request 所用 family
+
+    SessionListEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/SessionInfo'
+
+    # ---- 儲值紀錄 enum ----
+    DepositStatus:
+      type: string
+      enum: [pending, completed, failed, cancelled, refunded]
+      description: |
+        儲值狀態。狀態機：pending → {completed, failed, cancelled}；completed → refunded。
+        failed / cancelled / refunded 為終態。
+
+    PaymentMethod:
+      type: string
+      enum: [bank_transfer, credit_card, manual, convenience_store, e_wallet]
+
+    # ---- 儲值紀錄請求 ----
+    CreateDepositRequest:
+      type: object
+      required: [player_id, amount, payment_method]
+      properties:
+        player_id:
+          type: string
+          format: uuid
+          description: 必須存在於 members 表
+        amount:
+          type: integer
+          format: int64
+          minimum: 1
+          description: 正整數；單位為幣別最小單位（TWD：元）
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          default: TWD
+          description: 預設 TWD；3 字元 ISO 4217
+        payment_method:
+          $ref: '#/components/schemas/PaymentMethod'
+        internal_note:
+          type: string
+          maxLength: 2000
+          description: staff 內部備註，不對玩家顯示
+        display_note:
+          type: string
+          maxLength: 500
+          description: 對玩家顯示的說明
+        reference_no:
+          type: string
+          maxLength: 128
+          description: 金流商外部交易號；若提供，系統檢查唯一性
+      additionalProperties: false
+
+    UpdateDepositRequest:
+      type: object
+      description: |
+        至少需提供一個欄位。備註欄位三態語意：傳值=設定、`null`=清空、缺席=不修改。
+      properties:
+        status:
+          $ref: '#/components/schemas/DepositStatus'
+        internal_note:
+          type: [string, 'null']
+          maxLength: 2000
+        display_note:
+          type: [string, 'null']
+          maxLength: 500
+      additionalProperties: false
+
+    # ---- 儲值紀錄回應 ----
+    DepositRecord:
+      type: object
+      required: [id, player_id, player_name, amount, currency, status, payment_method, created_at, updated_at]
+      properties:
+        id:             { type: string, format: uuid }
+        player_id:      { type: string, format: uuid }
+        player_name:    { type: string }
+        amount:         { type: integer, format: int64 }
+        currency:       { type: string }
+        status:         { $ref: '#/components/schemas/DepositStatus' }
+        payment_method: { $ref: '#/components/schemas/PaymentMethod' }
+        operator_id:    { type: string, format: uuid }
+        operator_ip:    { type: string }
+        internal_note:  { type: string }
+        display_note:   { type: string }
+        reference_no:   { type: string }
+        created_at:     { type: string, format: date-time }
+        updated_at:     { type: string, format: date-time }
+
+    DepositRecordPublic:
+      type: object
+      description: 玩家端；不暴露 operator_*、internal_note、reference_no、player_id、player_name
+      required: [id, amount, currency, status, payment_method, created_at]
+      properties:
+        id:             { type: string, format: uuid }
+        amount:         { type: integer, format: int64 }
+        currency:       { type: string }
+        status:         { $ref: '#/components/schemas/DepositStatus' }
+        payment_method: { $ref: '#/components/schemas/PaymentMethod' }
+        display_note:   { type: string }
+        created_at:     { type: string, format: date-time }
+
+    DepositRecordEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/DepositRecord'
+
+    DepositRecordListEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/DepositRecord'
+
+    DepositRecordPublicListEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/DepositRecordPublic'
+
+    # ---- CMS Users ----
+    CMSUserDTO:
+      type: object
+      required: [id, username, role, created_at, updated_at]
+      properties:
+        id:         { type: string, format: uuid }
+        username:   { type: string }
+        role:       { type: string, enum: [admin, user, viewer] }
+        created_at: { type: string, format: date-time, description: "RFC3339 UTC" }
+        updated_at: { type: string, format: date-time, description: "RFC3339 UTC" }
+        deleted_at: { type: [string, 'null'], format: date-time, description: "僅 include_deleted=true 時可能出現" }
+
+    CMSUserResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/CMSUserDTO'
+
+    CMSUserListEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/CMSUserDTO'
+
+    # ---- 玩家查詢 ----
+    PlayerStatus:
+      type: string
+      enum: [active, frozen, closed]
+      description: 帳號狀態。本期一律 active（無變更端點）；frozen / closed 為未來範圍。
+
+    PlayerDTO:
+      type: object
+      description: |
+        玩家查詢結果。`email` / `phone` 對 viewer 角色遮罩（admin / user 為完整值）。
+        欄位皆顯式輸出（含 null），不用 omitempty，確保前端型別穩定。
+        不暴露 username / password_hash。
+      required: [player_id, external_id, display_name, email, phone, status, registered_at, last_active_at]
+      properties:
+        player_id:      { type: string, format: uuid, description: "= members.id" }
+        external_id:    { type: [string, 'null'], description: 外部遊戲系統識別碼 }
+        display_name:   { type: string }
+        email:          { type: [string, 'null'], description: "viewer 遮罩為 a***@example.com" }
+        phone:          { type: [string, 'null'], description: "viewer 遮罩為 +886***5678" }
+        status:         { $ref: '#/components/schemas/PlayerStatus' }
+        registered_at:  { type: string, format: date-time, description: "RFC3339 UTC（= members.created_at）" }
+        last_active_at: { type: [string, 'null'], format: date-time, description: 本期恆為 null（無寫入來源） }
+      additionalProperties: false
+
+    PlayerSearchResult:
+      type: object
+      required: [players, next_cursor]
+      properties:
+        players:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlayerDTO'
+        next_cursor:
+          type: [string, 'null']
+          description: opaque keyset cursor；最後一頁為 null
+      additionalProperties: false
+
+    PlayerEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/PlayerDTO'
+
+    # 搜尋結果不含 meta（非 page 分頁），data 為含 next_cursor 的物件
+    PlayerSearchResultEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/PlayerSearchResult'
+
+    # ---- 通用錯誤回應 ----
+    ErrorResponse:
+      type: object
+      required: [success, request_id, error]
+      properties:
+        success:
+          type: boolean
+          enum: [false]
+        request_id:
+          type: string
+          description: 對應 server log 與 audit log；客服回報時請提供
+        error:
+          type: string
+          description: |
+            穩定的 error code（snake_case）。前端應據此判定行為，不要解析人類可讀訊息：
+
+            | error | 場景 |
+            |---|---|
+            | `unauthorized` | 一般未授權 |
+            | `forbidden` | 已登入但權限不足 |
+            | `invalid input` | request body / query 格式錯誤 |
+            | `invalid_client` | 未知 / 不支援的 client_id |
+            | `token_expired` | access / refresh exp 過期；前端 retry refresh |
+            | `absolute_expired` | refresh.abs_exp 過期；強制 login，**不可** retry |
+            | `invalid_token` | 簽章 / iss / aud 失敗；走 login |
+            | `replay_detected` | 重放偵測；UI 提示「異常登入」走 login |
+            | `session_not_found` | family 已廢 / 已過期 |
+            | `session_revoked` | AuthMiddleware 命中黑名單（強制踢人） |
+            | `use_logout_instead` | 嘗試撤銷自己當前 family |
+            | `resource not found` | 一般 404 |
+            | `resource already exists` | 409 conflict |
+            | `username_taken` | Register 時 username 已被同表佔用（409） |
+            | `weak_password` | Register 時密碼不符弱密碼規則（422） |
+            | `too many requests` | 限流 |
+            | `internal server error` | 500 |
+        details:
+          type: array
+          description: 僅 validation 錯誤時出現
+          items:
+            $ref: '#/components/schemas/FieldError'
+
+    FieldError:
+      type: object
+      required: [field, message]
+      properties:
+        field:
+          type: string
+        message:
+          type: string
+
+  # ---- 共用 response 模板 ----
+  responses:
+    BadRequest:
+      description: 請求格式或內容錯誤
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    Unauthorized:
+      description: access token 缺失或無效
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            unauthorized:
+              value:
+                success: false
+                request_id: 0193b3f4-1234-7abc-9def-0123456789ab
+                error: unauthorized
+
+    Forbidden:
+      description: 已登入但權限不足（角色或 user type 不符）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            forbidden:
+              value:
+                success: false
+                request_id: 0193b3f4-1234-7abc-9def-0123456789ab
+                error: forbidden
+
+    NotFound:
+      description: 資源不存在
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    Conflict:
+      description: 資源衝突（如 username 已被占用）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            username_taken:
+              value:
+                success: false
+                request_id: 0193b3f4-1234-7abc-9def-0123456789ab
+                error: username_taken
+
+    UnprocessableEntity:
+      description: 語意違規（不變量違反 / 弱密碼）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            last_admin_lockout:
+              value:
+                success: false
+                request_id: 0193b3f4-1234-7abc-9def-0123456789ab
+                error: last_admin_lockout
+
+    TooManyRequests:
+      description: 觸發 rate limit
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: 建議重試前等待秒數
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'

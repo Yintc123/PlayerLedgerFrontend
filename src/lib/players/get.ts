@@ -1,17 +1,14 @@
 /**
- * getPlayer — 玩家詳情（spec 05 §4.5）。Mock 實作。
+ * getPlayer — 玩家詳情（GET /api/cms/players/{id}，對齊 spec 05 §4.5）。
+ *
+ * 真實串接：經 `cmsRequest` 呼叫後端；id 為 UUID，path 須 percent-encode；
+ * 玩家不存在後端回 404 → cmsRequest 拋 ApiError(404)，由呼叫端（RSC 頁面）處理。
  */
-import { ApiError } from '@/lib/api/errors';
-import { MOCK_PLAYERS, errorTriggerFor } from '@/lib/mock/dataset';
+import { cmsRequest } from '@/lib/api-client/cms';
+import { toPlayer, type RawPlayerDTO } from './transform';
 import type { Player } from './types';
 
 export async function getPlayer(playerId: string): Promise<Player> {
-  const trigger = errorTriggerFor(playerId);
-  if (trigger) throw trigger;
-
-  const player = MOCK_PLAYERS.find((p) => p.playerId === playerId);
-  if (!player) {
-    throw new ApiError(404, 'resource_not_found', '找不到此玩家');
-  }
-  return player;
+  const { data } = await cmsRequest<RawPlayerDTO>(`/cms/players/${encodeURIComponent(playerId)}`);
+  return toPlayer(data);
 }
