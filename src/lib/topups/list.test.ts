@@ -1,88 +1,128 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+const cmsRequestMock = vi.fn();
+vi.mock('@/lib/api-client/cms', () => ({
+  cmsRequest: (...args: unknown[]) => cmsRequestMock(...args),
+}));
+
 import { listDeposits } from './list';
 import { getDeposit } from './get';
 import { createDeposit } from './create';
-import { ApiError } from '@/lib/api/errors';
-import { MOCK_PLAYERS } from '@/lib/mock/dataset';
 
-const PLAYER_ID = MOCK_PLAYERS[0].playerId;
+function raw(id: string) {
+  return {
+    id,
+    player_id: `p-${id}`,
+    player_name: `玩家 ${id}`,
+    amount: 1000,
+    currency: 'TWD',
+    status: 'completed',
+    payment_method: 'bank_transfer',
+    operator_id: null,
+    operator_ip: null,
+    internal_note: null,
+    display_note: null,
+    reference_no: null,
+    created_at: '2026-06-20T03:11:22Z',
+    updated_at: '2026-06-20T03:11:22Z',
+  };
+}
 
-describe('listDeposits (mock, offset pagination)', () => {
-  it('should return offset page meta (page/pageSize/total)', async () => {
-    const result = await listDeposits({ playerId: PLAYER_ID, pageSize: 2, page: 1 });
-    expect(result.page).toBe(1);
-    expect(result.pageSize).toBe(2);
-    expect(result.total).toBeGreaterThan(2);
-    expect(result.records).toHaveLength(2);
-  });
+beforeEach(() => cmsRequestMock.mockReset());
 
-  it('should filter by status (multi-value OR)', async () => {
-    const result = await listDeposits({ playerId: PLAYER_ID, status: ['completed'] });
-    expect(result.records.every((r) => r.status === 'completed')).toBe(true);
-  });
-
-  it('should filter by payment method', async () => {
-    const result = await listDeposits({ playerId: PLAYER_ID, paymentMethod: ['credit_card'] });
-    expect(result.records.every((r) => r.paymentMethod === 'credit_card')).toBe(true);
-  });
-
-  it('should sort by -amount when requested', async () => {
-    const result = await listDeposits({ playerId: PLAYER_ID, sort: '-amount', pageSize: 100 });
-    const amounts = result.records.map((r) => r.amount);
-    expect(amounts).toEqual([...amounts].sort((a, b) => b - a));
-  });
-
-  it('should throw 400 when startDate > endDate', async () => {
-    await expect(
-      listDeposits({ startDate: '2026-06-30', endDate: '2026-06-01' })
-    ).rejects.toMatchObject({ status: 400 });
-  });
-
-  it('should throw a triggered ApiError (forbidden)', async () => {
-    await expect(listDeposits({ playerId: 'forbidden' })).rejects.toBeInstanceOf(ApiError);
-  });
-});
-
-describe('getDeposit (mock)', () => {
-  it('should return a record by id', async () => {
-    const record = await getDeposit('01HXYZ000000000000000000R1');
-    expect(record.id).toBe('01HXYZ000000000000000000R1');
-    expect(record.playerName).toBeTruthy();
-  });
-
-  it('should throw 404 for an unknown id', async () => {
-    await expect(getDeposit('does-not-exist')).rejects.toMatchObject({ status: 404 });
-  });
-});
-
-describe('createDeposit (mock)', () => {
-  it('should create a pending record with server-filled player_name', async () => {
-    const record = await createDeposit({
-      playerId: PLAYER_ID,
-      amount: 250,
-      paymentMethod: 'credit_card',
+describe('listDeposits (real API)', () => {
+  it('should request /cms/deposit-records with snake_case params and repeated keys', async () => {
+    cmsRequestMock.mockResolvedValue({ data: [], meta: { page: 1, pageSize: 20, total: 0 } });
+    await listDeposits({
+      playerId: 'P1',
+      status: ['pending', 'failed'],
+      paymentMethod: ['credit_card'],
+      startDate: '2026-06-01',
+      endDate: '2026-06-28',
+      sort: '-amount',
+      page: 2,
+      pageSize: 50,
     });
-    expect(record.status).toBe('pending');
-    expect(record.playerName).toBe(MOCK_PLAYERS[0].displayName);
-    expect(record.currency).toBe('TWD');
-    // 建立後可被列表查到
-    const list = await listDeposits({ playerId: PLAYER_ID, pageSize: 100 });
-    expect(list.records.some((r) => r.id === record.id)).toBe(true);
+    const [path, init] = cmsRequestMock.mock.calls[0];
+    expect(path).toBe('/cms/deposit-records');
+    const qs = (init.searchParams as URLSearchParams).toString();
+    expect(qs).toContain('player_id=P1');
+    expect(qs).toContain('page=2');
+    expect(qs).toContain('page_size=50');
+    expect(qs).toContain('status=pending');
+    expect(qs).toContain('status=failed');
+    expect(qs).toContain('payment_method=credit_card');
+    expect(qs).toContain('start_date=2026-06-01');
+    expect(qs).toContain('end_date=2026-06-28');
+    expect(qs).toContain('sort=-amount');
+    expect(qs).not.toContain('%2C'); // no comma-joined multi-values
   });
 
-  it('should throw 404 when player_id is not a known member', async () => {
-    await expect(
-      createDeposit({
-        playerId: '00000000-0000-0000-0000-000000000000',
-        amount: 1,
-        paymentMethod: 'manual',
-      })
-    ).rejects.toMatchObject({ status: 404 });
+  it('should NOT send player_id when omitted (all players)', async () => {
+    cmsRequestMock.mockResolvedValue({ data: [], meta: { page: 1, pageSize: 20, total: 0 } });
+    await listDeposits({});
+    const qs = (cmsRequestMock.mock.calls[0][1].searchParams as URLSearchParams).toString();
+    expect(qs).not.toContain('player_id');
   });
 
-  it('should throw 400 when amount < 1', async () => {
+  it('should transform records snake→camel and pass meta through', async () => {
+    cmsRequestMock.mockResolvedValue({
+      data: [raw('a')],
+      meta: { page: 1, pageSize: 20, total: 137 },
+    });
+    const res = await listDeposits({});
+    expect(res.records[0]).toMatchObject({
+      id: 'a',
+      playerId: 'p-a',
+      playerName: '玩家 a',
+      paymentMethod: 'bank_transfer',
+    });
+    expect(res).toMatchObject({ page: 1, pageSize: 20, total: 137 });
+  });
+
+  it('should default page/pageSize/total when meta is absent', async () => {
+    cmsRequestMock.mockResolvedValue({ data: [] });
+    expect(await listDeposits({})).toMatchObject({ page: 1, pageSize: 20, total: 0 });
+  });
+
+  it('should throw ApiError(400) when endDate < startDate without calling upstream', async () => {
     await expect(
-      createDeposit({ playerId: PLAYER_ID, amount: 0, paymentMethod: 'manual' })
+      listDeposits({ startDate: '2026-06-28', endDate: '2026-06-01' })
     ).rejects.toMatchObject({ status: 400 });
+    expect(cmsRequestMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('getDeposit (real API)', () => {
+  it('should request /cms/deposit-records/{id} and transform the record', async () => {
+    cmsRequestMock.mockResolvedValue({ data: raw('rec-1') });
+    const out = await getDeposit('rec-1');
+    expect(cmsRequestMock).toHaveBeenCalledWith('/cms/deposit-records/rec-1');
+    expect(out).toMatchObject({ id: 'rec-1', playerId: 'p-rec-1' });
+  });
+});
+
+describe('createDeposit (real API)', () => {
+  it('should POST a snake_case body and transform the created record', async () => {
+    cmsRequestMock.mockResolvedValue({ data: raw('new-1') });
+    await createDeposit({
+      playerId: 'P1',
+      amount: 1000,
+      paymentMethod: 'credit_card',
+      currency: 'TWD',
+      internalNote: 'note',
+      referenceNo: 'TXN-1',
+    });
+    const [path, init] = cmsRequestMock.mock.calls[0];
+    expect(path).toBe('/cms/deposit-records');
+    expect(init.method).toBe('POST');
+    expect(init.body).toMatchObject({
+      player_id: 'P1',
+      amount: 1000,
+      payment_method: 'credit_card',
+      currency: 'TWD',
+      internal_note: 'note',
+      reference_no: 'TXN-1',
+    });
   });
 });
