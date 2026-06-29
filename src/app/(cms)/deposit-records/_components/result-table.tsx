@@ -6,6 +6,7 @@ type Column = { key: string; label: string; align?: 'right'; sortField?: 'create
 const COLUMNS: ReadonlyArray<Column> = [
   { key: 'createdAt', label: '建立時間', sortField: 'createdAt' },
   { key: 'playerName', label: '玩家' },
+  { key: 'playerId', label: '玩家 ID' },
   { key: 'referenceNo', label: '參考號' },
   { key: 'amount', label: '金額', align: 'right', sortField: 'amount' },
   { key: 'paymentMethod', label: '支付方式' },

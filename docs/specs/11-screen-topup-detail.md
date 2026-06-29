@@ -99,8 +99,8 @@ src/app/(cms)/players/[playerId]/topups/[recordId]/
 │  ┌──────────────────────────────┐  └──────────────────────────┘    │
 │  │  TransactionCard             │                                  │
 │  │  - id（+ copy）              │  ┌──────────────────────────┐    │
-│  │  - playerId（+ 連結 09）     │  │  RelatedLinks            │    │
-│  │    + playerName              │  │  - 玩家詳情              │    │
+│  │  - 玩家：playerName（連結 09）│  │  RelatedLinks            │    │
+│  │  - 玩家 ID：playerId（+ copy）│  │  - 玩家詳情              │    │
 │  │  - referenceNo（+ copy）     │  │  - 玩家儲值列表           │    │
 │  │  - paymentMethod (label)     │  └──────────────────────────┘    │
 │  │  - internalNote / displayNote│                                  │
@@ -135,8 +135,8 @@ src/app/(cms)/players/[playerId]/topups/[recordId]/
 | 欄位 | 顯示規則 |
 |------|---------|
 | id | 等寬字型；右側 CopyButton |
-| playerId | `<a href="/players/[playerId]">` 連到玩家詳情；同列顯示 `playerName` |
-| playerName | 與 playerId 同列顯示（快照） |
+| 玩家（playerName） | `<a href="/players/[playerId]">` 連到玩家詳情，**僅顯示名稱**（快照） |
+| 玩家 ID（playerId） | **獨立欄位**；等寬字型 + CopyButton（與 `id` 欄一致）。名稱與 UUID 分開呈現 |
 | referenceNo | `null` → 隱藏整列；其餘等寬字型 + CopyButton |
 | paymentMethod | 中文 label（`lib/topups/labels.ts`） |
 | internalNote | `null` → 隱藏整列；多行文字（staff 內部備註）|
@@ -241,7 +241,8 @@ it('should render "-amount" refund line when status is refunded')
 ```ts
 // 顯示
 it('should render id in monospace with Copy button')
-it('should render playerId as link to /players/[playerId] and show playerName')
+it('should render the player as a link to /players/[playerId] showing only playerName')
+it('should render playerId in a separate "玩家 ID" field with a copy button')
 it('should hide referenceNo row when value is null')
 it('should render referenceNo in monospace with Copy button when not null')
 it('should render paymentMethod with chinese label from labels.ts')

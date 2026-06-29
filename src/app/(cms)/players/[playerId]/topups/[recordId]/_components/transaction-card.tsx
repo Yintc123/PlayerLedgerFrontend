@@ -51,8 +51,14 @@ export function TransactionCard({ record }: { record: DepositRecord }) {
           <Field label="玩家">
             <a href={`/players/${playerId}`} className="text-blue-600 hover:underline">
               {playerName}
-              <span className="text-muted-foreground ml-1 font-mono text-xs">{playerId}</span>
             </a>
+          </Field>
+
+          <Field label="玩家 ID">
+            <span className="inline-flex items-center justify-end gap-1">
+              <span className="font-mono break-all">{playerId}</span>
+              <CopyButton value={playerId} label="玩家 ID" />
+            </span>
           </Field>
 
           {referenceNo !== null && (

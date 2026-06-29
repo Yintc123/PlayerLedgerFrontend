@@ -253,12 +253,13 @@ type PaginationProps = {
 
 ### B5.1 欄位
 
-在 [`10 §5.1`](./10-screen-topup-list.md) 基礎上，**「玩家」欄為主要新增**（spec 10 雖也有玩家欄，但本頁玩家欄需可點擊聚焦 / 導頁）：
+在 [`10 §5.1`](./10-screen-topup-list.md) 基礎上，**「玩家」與「玩家 ID」為主要新增**（跨玩家頁需同時可讀名稱與唯一識別碼；玩家名稱可能重複，UUID 才唯一）。**名稱與 UUID 拆成兩獨立欄位**：
 
 | 欄位 | 來源 | 顯示 |
 |------|------|------|
 | 建立時間 | `createdAt` | `MM-DD HH:mm`（本年）/ `YYYY-MM-DD HH:mm`（跨年） |
-| **玩家** | `playerName` + `playerId` | 暱稱快照；過長截斷 + tooltip；**可點擊**（見 B5.2） |
+| **玩家** | `playerName` | 暱稱快照；過長截斷 + tooltip；**可點擊聚焦**（見 B5.2） |
+| **玩家 ID** | `playerId` | 後端 `members` UUID；等寬字、過長截斷 + tooltip（hover 看完整）；獨立欄位，與名稱分開 |
 | 參考號 | `referenceNo` | `null` → `—`；截斷 + tooltip |
 | 金額 | `amount` + `currency` | `Intl.NumberFormat` 依幣別最小單位；右對齊 |
 | 支付方式 | `paymentMethod` | 中文 label（`labels.ts`） |
@@ -382,6 +383,7 @@ it('should disable Apply when date-range inline validation fails')
 
 ```ts
 it('should render the player column with playerName')
+it('should render the player ID (UUID) in its own column')
 it('should navigate to /players/[playerId]/topups/[id] when the row is clicked')
 it('should focus the player (push ?playerId=, preserving other filters, page reset to 1) when the player link is clicked, without navigating to detail')
 it('should render "—" when referenceNo is null')
@@ -394,6 +396,7 @@ it('should be focusable and navigate on Enter')
 
 ```ts
 it('should render a column header "玩家"')
+it('should render a separate column header "玩家 ID"')
 it('should render one ResultRow per record')
 it('should mark sorted column with aria-sort')
 ```

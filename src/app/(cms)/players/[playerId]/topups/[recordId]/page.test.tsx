@@ -73,10 +73,10 @@ describe('TopupDetail', () => {
   it('should show playerName in breadcrumb linking to /players/[playerId]', async () => {
     getDepositMock.mockResolvedValue(makeRecord());
     render(await TopupDetail({ playerId: '01HABCPLAYER', recordId: 'R1' }));
-    expect(screen.getByRole('link', { name: '王小明' })).toHaveAttribute(
-      'href',
-      '/players/01HABCPLAYER'
-    );
+    // 麵包屑與交易卡都有「王小明」連結，皆應導向玩家詳情
+    const links = screen.getAllByRole('link', { name: '王小明' });
+    expect(links.length).toBeGreaterThan(0);
+    links.forEach((l) => expect(l).toHaveAttribute('href', '/players/01HABCPLAYER'));
   });
 
   it('should call notFound() when getDeposit throws 404', async () => {

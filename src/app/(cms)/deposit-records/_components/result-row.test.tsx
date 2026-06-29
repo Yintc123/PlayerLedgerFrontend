@@ -49,6 +49,11 @@ describe('ResultRow (deposit-records)', () => {
     expect(screen.getByText('玩家一號')).toBeInTheDocument();
   });
 
+  it('should render the player ID (UUID) in its own column', () => {
+    renderRow(makeRecord({ playerId: '4562149b-fa63-4507-8cce-60b1ce063a6b' }));
+    expect(screen.getByText('4562149b-fa63-4507-8cce-60b1ce063a6b')).toBeInTheDocument();
+  });
+
   it('should navigate to /players/[playerId]/topups/[id] when the row is clicked', async () => {
     const user = userEvent.setup();
     renderRow(makeRecord({ id: 'rec-9', playerId: 'p9' }));

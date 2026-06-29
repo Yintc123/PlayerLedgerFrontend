@@ -42,6 +42,13 @@ describe('TransactionCard', () => {
     );
   });
 
+  it('should render playerId in a separate "玩家 ID" field with a copy button', () => {
+    render(<TransactionCard record={base} />);
+    expect(screen.getByText('玩家 ID')).toBeInTheDocument();
+    expect(screen.getByText('01HABCPLAYER')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '複製玩家 ID' })).toBeInTheDocument();
+  });
+
   it('should hide referenceNo row when value is null', () => {
     render(<TransactionCard record={{ ...base, referenceNo: null }} />);
     expect(screen.queryByText('金流交易號')).not.toBeInTheDocument();

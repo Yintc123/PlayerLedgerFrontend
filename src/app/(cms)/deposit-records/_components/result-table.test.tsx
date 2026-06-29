@@ -34,6 +34,11 @@ describe('ResultTable (deposit-records)', () => {
     expect(screen.getByRole('columnheader', { name: '玩家' })).toBeInTheDocument();
   });
 
+  it('should render a separate column header "玩家 ID"', () => {
+    render(<ResultTable records={[makeRecord('a')]} query={{}} />);
+    expect(screen.getByRole('columnheader', { name: '玩家 ID' })).toBeInTheDocument();
+  });
+
   it('should render one row per record (plus the header row)', () => {
     render(<ResultTable records={[makeRecord('a'), makeRecord('b')]} query={{}} />);
     expect(screen.getAllByRole('row')).toHaveLength(3);

@@ -57,6 +57,9 @@ export function ResultRow({ record, query }: { record: DepositRecord; query: Dep
           {record.playerName}
         </button>
       </td>
+      <td className="text-muted-foreground px-4 py-3 font-mono text-xs" title={record.playerId}>
+        <span className="block max-w-[12rem] truncate">{record.playerId}</span>
+      </td>
       <td className="px-4 py-3 font-mono text-xs" title={record.referenceNo ?? undefined}>
         <span className="block max-w-40 truncate">{record.referenceNo ?? DASH}</span>
       </td>
