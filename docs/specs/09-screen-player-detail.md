@@ -1,5 +1,12 @@
 # 玩家詳情頁規格書
 
+> **⚠️ 後端目前無玩家詳情 / 儲值彙總端點（2026-06）**：定案的後端 OpenAPI 未提供 `/api/players/{id}`，
+> 亦**無玩家儲值彙總（summary）端點**（見 [`05`](./05-player-query-domain.md) 頂端 callout 與 [`06 §7`](./06-topup-records-domain.md)）。
+> 後端僅以 `player_id` 在 deposit record 內引用玩家（由後端補 `player_name`）。
+> 本頁的「基本資料卡」與「儲值彙總卡」**暫以 mock 呈現**；**需向後端要求新增 members 詳情 + 儲值彙總端點**後再對接。
+> 「最近紀錄」區塊可改打扁平 `GET /api/cms/deposit-records?player_id=<id>`（[`06`](./06-topup-records-domain.md)），但 summary 仍需後端補端點。
+> 端點路徑前綴已更新為無版本號 `/api/...`。
+
 ## 1. 概覽
 
 CMS 後台「玩家詳情頁」——從 [`08`](./08-screen-player-search.md) 玩家搜尋頁進入後，顯示單一玩家的基本資料、儲值彙總，並提供進入儲值紀錄列表（[`10`](./10-screen-topup-list.md)）的入口。
@@ -55,11 +62,12 @@ src/app/(cms)/players/[playerId]/
     ├── topup-summary-card.test.tsx
     ├── recent-topups.tsx          # 最近紀錄區塊（Server）
     ├── recent-topups.test.tsx
-    ├── status-tag.tsx             # 玩家狀態 tag（Server）— 與 spec 08 共用？見 §3.2
+    ├── error-block.tsx            # SummaryErrorBlock / RecentErrorBlock（Client；role="alert" + 重試 router.refresh()）
+    ├── status-tag.tsx             # 玩家狀態 tag — re-export 共用元件，見 §3.2
     └── forbidden-state.tsx        # 403 整頁錯誤態（Server）
 ```
 
-> **共用 component 放哪**：`status-tag` 在 [`08`](./08-screen-player-search.md) 結果列也用到。v1 先各自實作，待 spec 10 / 11 出現第三處時提升到 `src/components/players/status-tag.tsx`。**過早抽象比重複更危險**——三處實作會自然顯示共同 API。
+> **共用 component 放哪（已解決）**：`status-tag` 在 [`08`](./08-screen-player-search.md) 結果列也用到。原設計判斷為「過早抽象比重複更危險」——v1 各自實作，待出現第三處時再提升。現 08–11 四個畫面皆已實作，提升已完成：共同實作集中於 `src/components/players/status-tag.tsx`（`PlayerStatusTag`），本目錄的 `_components/status-tag.tsx` 僅 re-export 維持本 spec §2.2 檔案結構：`export { PlayerStatusTag as StatusTag } from '@/components/players/status-tag'`。
 
 ---
 
@@ -99,7 +107,7 @@ src/app/(cms)/players/[playerId]/
 │  ┌──────────────────────────────────────────────────────────────┐  │
 │  │  RecentTopups（最近 5 筆）           [ 查看全部紀錄 → ]     │  │
 │  │  ┌────────────────────────────────────────────────────────┐  │  │
-│  │  │ 2026-06-25 14:00  TWD 199  credit_card  ✅ success    │  │  │
+│  │  │ 2026-06-25 14:00  TWD 199  credit_card  ✅ completed  │  │  │
 │  │  │ ...                                                    │  │  │
 │  │  └────────────────────────────────────────────────────────┘  │  │
 │  └──────────────────────────────────────────────────────────────┘  │
@@ -149,6 +157,7 @@ src/app/(cms)/players/[playerId]/
 - 三個 API 呼叫（`getPlayer` / `getPlayerTopupSummary` / `listTopups(limit:5)`）並行
 - 每列顯示：`createdAt`（簡短時間）/ `amount currency` / `paymentMethod` / `status` tag
 - 點列 → `router.push('/players/[playerId]/topups/[recordId]')`
+  - 實作：外層 `div role="listitem"`（`tabIndex 0`，click / Enter 觸發 `router.push`）包一個真實的 `<a href="/players/[playerId]/topups/[recordId]">`（`display:contents`），內層 anchor 的 click 被攔截以避免雙重導頁。同時滿足 §8.4（push 導頁）與 §8.3（每列渲染語意連結，漸進增強）。
 - 「查看全部紀錄」連結 → `/players/[playerId]/topups`
 - 空狀態：「最近無儲值紀錄」（與彙總空狀態語意可能重複，但兩區塊是獨立來源——彙總算成功＋退款累積，列表回最近 5 筆原始紀錄；理論一致但**不假設**）
 
@@ -175,13 +184,14 @@ src/app/(cms)/players/[playerId]/
 
 ```tsx
 // app/(cms)/players/[playerId]/page.tsx
-export default async function Page({ params }: { params: { playerId: string } }) {
-  const playerResult = await getPlayer(params.playerId)  // 主資料；失敗整頁錯
+export default async function Page({ params }: { params: Promise<{ playerId: string }> }) {
+  const { playerId } = await params              // Next.js 16：params 為 Promise，需先 await
+  const playerResult = await getPlayer(playerId)  // 主資料；失敗整頁錯
   // 上面拋出時，由 not-found.tsx / forbidden 處理 / error.tsx 接住
 
   const [summaryResult, recentResult] = await Promise.allSettled([
-    getPlayerTopupSummary(params.playerId),
-    listTopups(params.playerId, { limit: 5, sort: 'created_at_desc' }),
+    getPlayerTopupSummary(playerId),
+    listTopups(playerId, { limit: 5, sort: 'created_at_desc' }),
   ])
 
   return (

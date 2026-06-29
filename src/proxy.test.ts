@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
-import { proxy } from './proxy';
+import { proxy, buildCsp } from './proxy';
 import { checkLimit } from '@/lib/rate-limit/limiter';
 
 vi.mock('@/lib/config', () => ({
@@ -172,6 +172,26 @@ describe('proxy.ts (ADR 013 + 007)', () => {
     it('should set x-nonce request header for downstream Server Components', () => {
       // 注入请求头
       expect(true).toBe(true);
+    });
+
+    it('should include the nonce in script-src', () => {
+      expect(buildCsp('abc123')).toContain("script-src 'self' 'nonce-abc123'");
+    });
+
+    it('should NOT include unsafe-eval in production', () => {
+      const prev = process.env.NODE_ENV;
+      vi.stubEnv('NODE_ENV', 'production');
+      expect(buildCsp('n')).not.toContain('unsafe-eval');
+      vi.stubEnv('NODE_ENV', prev ?? 'test');
+      vi.unstubAllEnvs();
+    });
+
+    it('should include unsafe-eval in development (React dev mode needs eval)', () => {
+      const prev = process.env.NODE_ENV;
+      vi.stubEnv('NODE_ENV', 'development');
+      expect(buildCsp('n')).toContain("'unsafe-eval'");
+      vi.stubEnv('NODE_ENV', prev ?? 'test');
+      vi.unstubAllEnvs();
     });
   });
 

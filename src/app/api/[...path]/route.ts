@@ -78,7 +78,7 @@ async function handleProxy(req: NextRequest, ctx: { params: Promise<{ path: stri
       if (body === '') body = undefined;
     }
 
-    // 步驟 5: 組合 upstream URL（CMS endpoints 使用 cmsBasePath=/api，無版本號；auth 用 basePath=/api/v1）
+    // 步驟 5: 組合 upstream URL（CMS endpoints 使用 cmsBasePath=/api，無版本號；auth 用 basePath=/api（後端已移除 /api/v1，與 CMS 同前綴））
     const upstreamUrl = `${config.api.baseUrl}${config.api.cmsBasePath}/${path.join('/')}${req.nextUrl.search}`;
 
     // 步驟 6: 準備 headers（白名單轉發）

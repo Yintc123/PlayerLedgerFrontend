@@ -188,7 +188,7 @@ export async function DELETE(req, ctx) { return handleProxy(req, ctx) }
 | Browser: `POST /api/cms/players/123/topups` | Upstream: `POST ${API_BASE_URL}${CMS_API_BASE_PATH}/cms/players/123/topups` |
 | Browser: `GET /api/?foo=bar`（空 path 段） | 400 `{error:"invalid_path"}` — 拒絕，不該發生 |
 
-> **為何 `[...path]` 使用 `CMS_API_BASE_PATH` 而非 `API_BASE_PATH`：** 後端 auth endpoints（`/auth/login` 等）在 `/api/v1`（有版本號），而 CMS 業務 endpoints 在 `/api`（無版本號）。`lib/auth/*.ts` 直接硬編 `/auth/...` 並使用 `API_BASE_PATH`；catch-all proxy 只轉發 CMS 請求，故使用獨立的 `CMS_API_BASE_PATH`（預設 `/api`）。兩者不可混用。
+> **為何 `[...path]` 使用 `CMS_API_BASE_PATH` 而非 `API_BASE_PATH`：** 後端已移除 `/api/v1` 版本號，auth endpoints（`/auth/login` 等）與 CMS 業務 endpoints 現在同樣掛在 `/api` 下，兩個 env var 都預設 `/api`。保留兩個獨立變數是為了 override 彈性（未來若 auth / CMS 前綴需分歧，可各自調整）。`lib/auth/*.ts` 直接硬編 `/auth/...` 並使用 `API_BASE_PATH`；catch-all proxy 只轉發 CMS 請求，故使用獨立的 `CMS_API_BASE_PATH`。兩者不可混用。
 
 - `params.path: string[]` 由 Next.js 解析，**不做** `decodeURIComponent`（catch-all 保持原樣，避免雙重 decode）
 - Query string **必須使用 `req.nextUrl.search`**（含開頭 `?` 的原始字串）直接拼接到 upstream URL，**禁止改用 `req.nextUrl.searchParams`**——後者會 percent-decode → re-encode、把 `+` 轉成空白，造成簽章類 / `application/x-www-form-urlencoded` query 失真。實作範例：`const upstreamUrl = ${apiBase}/${path.join('/')}${req.nextUrl.search}`
@@ -333,9 +333,9 @@ it('should pass through upstream 4xx body unchanged')   // 後端 ADR 004 valida
 | `REDIS_PORT` | ❌ | Redis 埠號，預設 `6379` |
 | `REDIS_PASSWORD` | ❌ | Redis 密碼；無密碼時留空 |
 | `REDIS_DB` | ❌ | Redis 資料庫索引，預設 `0` |
-| `API_BASE_URL` | ✅ | Go API Server 的 Base URL，**只到 host[:port]**，不含 path（例 `https://api.playerledger.com`、`http://localhost:8080`）。後端 OpenAPI `servers` 雖然寫 `http://localhost:8080/api/v1`，但 ops 端點（`/health`、`/health/ready`、`/metrics`）在 root 而非 `/api/v1` 下；分離為 `API_BASE_URL` + `API_BASE_PATH` 才能同時處理兩類路徑 |
-| `API_BASE_PATH` | ❌ | Auth endpoint path prefix，預設 `/api/v1`。僅供 `lib/auth/*.ts`（login / logout / refresh）使用，拼接為 `${API_BASE_URL}${API_BASE_PATH}/auth/<action>`；ops 端點直接用 `${API_BASE_URL}/health` |
-| `CMS_API_BASE_PATH` | ❌ | CMS 業務 endpoint path prefix，預設 `/api`（後端 CMS routes 無版本號）。`app/api/[...path]/route.ts` proxy 使用此值，拼接為 `${API_BASE_URL}${CMS_API_BASE_PATH}/<path>` |
+| `API_BASE_URL` | ✅ | Go API Server 的 Base URL，**只到 host[:port]**，不含 path（例 `https://api.playerledger.com`、`http://localhost:8080`）。後端 OpenAPI `servers` 為 `http://localhost:8080/api`（已移除 `/api/v1` 版本號），但 ops 端點（`/health`、`/health/ready`、`/metrics`）在 root 而非 `/api` 下；分離為 `API_BASE_URL` + `API_BASE_PATH` 才能同時處理兩類路徑 |
+| `API_BASE_PATH` | ❌ | Auth endpoint path prefix，預設 `/api`（後端已移除 `/api/v1` 版本號）。僅供 `lib/auth/*.ts`（login / logout / refresh）使用，拼接為 `${API_BASE_URL}${API_BASE_PATH}/auth/<action>`；ops 端點直接用 `${API_BASE_URL}/health` |
+| `CMS_API_BASE_PATH` | ❌ | CMS 業務 endpoint path prefix，預設 `/api`（後端已移除版本號，與 auth 共用 `/api`）。`app/api/[...path]/route.ts` proxy 使用此值，拼接為 `${API_BASE_URL}${CMS_API_BASE_PATH}/<path>` |
 | `API_TIMEOUT_MS` | ❌ | 對上游 API Server 單次 `fetch` 的 hard timeout，預設 `20000`（20 秒，對齊 §12.1 API Gateway 29 秒上限的安全餘量）。**不可設定大於 25000**——超過會被 API Gateway 直接砍而非走 BFF 自己的 timeout 路徑 |
 | `CLIENT_ID` | ✅ | BFF 對應的後端 client policy 鍵值（如 `cms-web` / `public-web`）；login 時注入 request body 取得對應 refresh / absolute TTL，詳見後端 ADR 007。允許值由後端 `JWT_CLIENT_POLICIES` 定義。**必填**——由 ECS Task Definition 在每個環境明確指定，不在程式碼設預設值（避免 staging 誤用 cms-web 政策） |
 | `PUBLIC_ORIGIN` | ✅ | BFF 對外服務的完整 origin（含 scheme + hostname + port），例 `https://playerledger.com`。供 proxy.ts 的 Origin check 使用，詳見 [ADR 013](../adr/013-csrf-defense-strategy.md) |
@@ -423,8 +423,8 @@ export const config = {
   },
   api: {
     baseUrl:   required('API_BASE_URL').replace(/\/$/, ''),    // 強制去掉 trailing slash 避免雙 //
-    basePath:    (process.env.API_BASE_PATH ?? '/api/v1').replace(/\/$/, ''),     // auth endpoint prefix（/api/v1）；ops 端點不用
-    cmsBasePath: (process.env.CMS_API_BASE_PATH ?? '/api').replace(/\/$/, ''),   // CMS 業務 endpoint prefix（/api，無版本號）
+    basePath:    (process.env.API_BASE_PATH ?? '/api').replace(/\/$/, ''),     // auth endpoint prefix（/api，已移除 /api/v1 版本號）；ops 端點不用
+    cmsBasePath: (process.env.CMS_API_BASE_PATH ?? '/api').replace(/\/$/, ''),   // CMS 業務 endpoint prefix（/api，與 auth 共用）
     clientId:  clientId('CLIENT_ID'),                          // 啟動時驗證屬於 OpenAPI ClientID enum，fail-fast
     timeoutMs: optionalInt('API_TIMEOUT_MS', 20_000, { min: 1_000, max: 25_000 }),
                                                                // 上界 25000：API Gateway 29 秒上限的安全餘量（§12.1）；超過會被 APIGW 直接砍
@@ -466,7 +466,7 @@ it('should throw when REDIS_HOST is missing')
 it('should throw when API_BASE_URL is missing')
 it('should throw when CLIENT_ID is missing')           // 不提供 default，缺值即失敗（§5 註）
 it('should throw when CLIENT_ID is not in OpenAPI ClientID enum (e.g. "cms_web", "CMS-WEB")')
-it('should default API_BASE_PATH to /api/v1 when not set')
+it('should default API_BASE_PATH to /api when not set')
 it('should default CMS_API_BASE_PATH to /api when not set')
 it('should strip trailing slash from API_BASE_URL and API_BASE_PATH to avoid // collisions')
 it('should strip trailing slash from CMS_API_BASE_PATH to avoid // collisions')
@@ -840,7 +840,7 @@ export const healthRedis = new Redis({
 | 項目 | 操作 | timeout | 失敗判定 |
 |------|------|---------|---------|
 | `redis` | 同 shallow | 2s | 同 shallow（ioredis `commandTimeout`） |
-| `apiServer` | `GET ${API_BASE_URL}/health/ready` | 3s | 非 2xx 或網路錯誤；用 `AbortSignal.timeout(3000)`。**路徑為後端 root `/health/ready` 而非 `/api/v1/health/ready`**——後端 ops 端點不在業務 path prefix 下（backend infrastructure.md §11），故**不**串 `API_BASE_PATH` |
+| `apiServer` | `GET ${API_BASE_URL}/health/ready` | 3s | 非 2xx 或網路錯誤；用 `AbortSignal.timeout(3000)`。**路徑為後端 root `/health/ready` 而非 `/api/health/ready`**——後端 ops 端點不在業務 path prefix 下（backend infrastructure.md §11），故**不**串 `API_BASE_PATH` |
 
 所有檢查並行（`Promise.allSettled`）。整體 endpoint 內部 timeout 不超過 4s（< ECS Target Group 5s timeout，但 deep 本來就不放 Target Group）。
 
@@ -937,6 +937,8 @@ Content-Security-Policy:
   form-action 'self';
   upgrade-insecure-requests;
 ```
+
+**開發模式的 `'unsafe-eval'` 例外：** Next.js / React 開發模式（Fast Refresh、從不同環境重建 callstack 等除錯功能）會用到 `eval()`，CSP 不放行時瀏覽器 console 會報「eval() is not supported」。因此 `buildCsp` 僅在 `process.env.NODE_ENV !== 'production'` 時於 `script-src` 附加 `'unsafe-eval'`；**production build 一律不含**，維持嚴格 CSP。React 在 production 模式不使用 `eval()`。
 
 **為何 `style-src` 允許 `unsafe-inline`：** Next.js / styled-jsx / Tailwind 在 SSR 時會 inline 部分 critical CSS，完全禁用 inline style 會大幅破壞渲染。權衡後接受此風險（CSS injection 的攻擊面遠小於 script injection）。
 

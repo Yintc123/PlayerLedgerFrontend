@@ -2,110 +2,141 @@
 
 ## 1. 概覽
 
-本文件定義 CMS 後台「儲值紀錄查詢」功能的**業務邏輯層**。畫面層規格見 [`10-screen-topup-list.md`](./10-screen-topup-list.md) 與 [`11-screen-topup-detail.md`](./11-screen-topup-detail.md)。
+本文件定義 CMS 後台「儲值紀錄（Deposit Records）」功能的**業務邏輯層**。畫面層規格見 [`10-screen-topup-list.md`](./10-screen-topup-list.md) 與 [`11-screen-topup-detail.md`](./11-screen-topup-detail.md)。
+
+> **後端契約已定案（2026-06）**：本文件先前的端點設計為前端推測，已依後端 `schema/openapi.yaml`、
+> `deposit-records-api.md`、`deposit-records-model.md` 重整。重點變動：
+> - 端點**無版本前綴**（`/api/...`，不再有 `/api/v1`）。
+> - 儲值紀錄為**扁平資源** `/api/cms/deposit-records`（+ `/{id}`），**不**巢狀於 `/players/{id}/...`。
+> - 分頁改為 **OFFSET**（`page` / `page_size` + `meta.total`），不再是 cursor。
+> - 狀態 enum 用 `completed`（不是 `success`）。
+> - 後端**目前無**玩家儲值彙總（summary）與匯出（CSV/export）端點——見 §7、§8。
 
 範圍：
 
-- 儲值紀錄資料模型與狀態機
-- 列表查詢（必繫結 `playerId`、日期區間、狀態、支付方式篩選）
+- 儲值紀錄資料模型（`DepositRecord`）與狀態機
+- CMS 列表查詢（`player_id` / 日期區間 / 狀態 / 支付方式篩選、OFFSET 分頁）
+- 建立（POST）與更新狀態／備註（PATCH）
 - 排序與分頁
 - 單筆明細
-- 玩家層級彙總統計
-- 匯出 CSV（含大量資料的 async job 模式）
+- 玩家層級彙總統計（§7，**後端尚無端點**）
+- 匯出 CSV（§8，**後端尚無端點**）
 - TDD 測試清單
 
 **不在本文件範圍**：
 
 - 玩家識別與搜尋——見 [`05-player-query-domain.md`](./05-player-query-domain.md)
 - 角色權限與稽核事件結構——見 [`07-admin-rbac-audit.md`](./07-admin-rbac-audit.md)
-- 退款／補單／重發等寫入動作（v1 純查詢）
+- 退款／補單／重發等複雜寫入流程（v1 僅 PATCH 狀態轉換）
 
 ### 核心原則
 
-- **以玩家為單位**：所有列表查詢必須帶 `playerId`，**不支援**跨玩家全平台瀏覽——後台場景以「定位某玩家後查其紀錄」為主，跨玩家查詢屬於財務報表系統職責
-- **金額單位明確**：所有金額欄位以**整數最小貨幣單位**（如 TWD 分、USD cent）傳輸，UI 顯示時除以該幣別 minor unit。**禁止**用 float 表示金額
-- **時間統一 UTC**：所有時間欄位以 ISO 8601 UTC 字串傳遞；時區轉換在 UI 層完成
-- **狀態唯一來源是後端**：BFF 不嘗試本地推斷「pending 太久 = failed」之類，全部依後端 `status` 欄位
-- **匯出有審計責任**：任何匯出動作觸發後端稽核（操作者、條件、時間、匯出筆數）；BFF 不快取匯出結果
+- **扁平資源 + `player_id` 篩選**：CMS 列表為跨玩家的扁平資源 `/api/cms/deposit-records`，以 `player_id` query 參數聚焦特定玩家（非 path 巢狀）。玩家自助端點 `/api/me/deposit-records` 則由 token `claims.sub` 自動繫結，caller 不可指定
+- **金額單位明確**：所有金額欄位以**整數最小貨幣單位**傳輸（見 §2.1 各幣別規則：TWD→元、USD→cent、JPY→円）。**禁止**用 float 表示金額
+- **時間統一 UTC**：所有時間欄位以 RFC 3339 / ISO 8601 UTC 字串傳遞；時區轉換在 UI 層完成
+- **狀態唯一來源是後端**：BFF 不嘗試本地推斷「pending 太久 = failed」之類，全部依後端 `status` 欄位；狀態轉換合法性由後端 PATCH 強制（非法轉換回 `422 invalid_transition`）
+- **server 自動填入不可偽造**：`player_name`（後端從 members 查）、`operator_id`（token）、`operator_ip`（ClientIP）由後端填入，caller 不得指定
 
 ---
 
 ## 2. 資料模型
 
-### 2.1 `TopupRecord` 欄位
+### 2.1 `DepositRecord` 欄位（CMS 端，camelCase 後）
 
-| 欄位 | 型別 | 必填 | 說明 |
-|------|------|------|------|
-| `recordId` | `string` | ✅ | PlayerLedger 內部主鍵；URL/log/稽核唯一引用 |
-| `playerId` | `string` | ✅ | 對應 [`05`](./05-player-query-domain.md) `Player.playerId` |
-| `orderId` | `string \| null` | ❌ | 對應遊戲端訂單 ID（外部系統） |
-| `amount` | `integer` | ✅ | **最小貨幣單位**（TWD=分、JPY=日圓本身、BTC=satoshi）；以整數表示，避免浮點誤差 |
-| `currency` | `string` | ✅ | ISO 4217 三字母代碼（`TWD` / `USD` / `JPY` / ...） |
-| `paymentMethod` | `string` | ✅ | 後端定義的 enum（如 `credit_card` / `apple_pay` / `google_pay` / `bank_transfer` / `crypto_usdt`）；前端不寫死 enum，從 OpenAPI 取 |
-| `paymentChannel` | `string \| null` | ❌ | 支付通道細節（如 `stripe` / `tappay` / `ecpay`），供財務分潤檢核 |
-| `status` | `'pending' \| 'success' \| 'failed' \| 'refunded' \| 'cancelled'` | ✅ | 見 §2.2 狀態機 |
-| `failureReason` | `string \| null` | ❌ | 後端定義的失敗代碼（如 `insufficient_funds` / `3ds_failed`）；僅 `status=failed` 時非 null |
-| `createdAt` | `string`（ISO 8601 UTC） | ✅ | 訂單建立時間 |
-| `paidAt` | `string \| null`（ISO 8601 UTC） | ❌ | 實際付款完成時間；`status=success/refunded` 必有值 |
-| `refundedAt` | `string \| null`（ISO 8601 UTC） | ❌ | 退款時間；`status=refunded` 必有值 |
+對應後端 `DepositRecord`（CMS 端完整欄位）。前端轉換為 camelCase 後對應如下：
 
-> **`amount` 為何用 integer 最小單位**：JavaScript `number` 對 `0.1 + 0.2` 都會誤差；金額用 float 在後台對帳時是**直接事故**。整數最小單位與後端 / 資料庫對齊，UI 顯示時再用 `Intl.NumberFormat` 還原。
+| 欄位 | 後端欄位 | 型別 | 必填 | 說明 |
+|------|---------|------|------|------|
+| `id` | `id` | `string`（UUID） | ✅ | PlayerLedger 內部主鍵；URL/log/稽核唯一引用 |
+| `playerId` | `player_id` | `string`（UUID） | ✅ | 對應 [`05`](./05-player-query-domain.md) `Player.playerId`；引用 members |
+| `playerName` | `player_name` | `string` | ✅ | 建立當下從 members 取得的快照（server 自動填入）|
+| `amount` | `amount` | `integer`（int64） | ✅ | **幣別最小單位**整數（見下方幣別規則）；以整數表示，避免浮點誤差 |
+| `currency` | `currency` | `string` | ✅ | ISO 4217 三字母代碼；後端目前 DB CHECK 僅允許 `TWD`（預設） |
+| `status` | `status` | `'pending' \| 'completed' \| 'failed' \| 'cancelled' \| 'refunded'` | ✅ | 見 §2.2 狀態機 |
+| `paymentMethod` | `payment_method` | `'bank_transfer' \| 'credit_card' \| 'manual' \| 'convenience_store' \| 'e_wallet'` | ✅ | 後端 enum 白名單；前端不寫死，從 OpenAPI 取 |
+| `operatorId` | `operator_id` | `string \| null`（UUID） | ❌ | 建立此筆的 CMS staff（server 填入）；預留 null 給未來自動入帳 |
+| `operatorIp` | `operator_ip` | `string \| null` | ❌ | 建立時的操作者 IP（server 從 ClientIP 擷取） |
+| `internalNote` | `internal_note` | `string \| null` | ❌ | staff 內部備註，**不對玩家顯示**；上限 2000 字元 |
+| `displayNote` | `display_note` | `string \| null` | ❌ | 可對玩家顯示的說明；上限 500 字元 |
+| `referenceNo` | `reference_no` | `string \| null` | ❌ | 金流商外部交易號；若提供則唯一；上限 128 字元 |
+| `createdAt` | `created_at` | `string`（RFC 3339 UTC） | ✅ | 建立時間 |
+| `updatedAt` | `updated_at` | `string`（RFC 3339 UTC） | ✅ | 最後異動時間 |
 
-> **退款顯示**：v1 後端對退款採「同筆 record 變更 status 為 refunded」而非另開負金額紀錄；若後端改採另開 record 模型，本欄位設計與 §4.2 篩選邏輯需重整。實作前請與後端確認（[§12 開放問題](#12-開放問題)）。
+> **後端模型不含**：`order_id`、`payment_channel`、`failure_reason`、`paid_at`、`refunded_at`。
+> 先前版本的這些欄位皆為前端推測，已移除。時間軸只能由 `createdAt` + `updatedAt` + `status` 推導（見 [`11 §4.4`](./11-screen-topup-detail.md)）。
+
+> **幣別最小單位規則**：`amount` 以該幣別最小單位的整數表示，**但小數位數依幣別而非 ISO 4217 預設**：
+> - `TWD` → **元**（0 位小數，1000 元 = `1000`）— 注意 TWD 非 ISO 的 2 位
+> - `USD` → **cent**（2 位小數，$10.50 = `1050`）
+> - `JPY` → **円**（0 位小數，500 円 = `500`）
+>
+> `currency` 欄位決定如何解讀 `amount`；UI 顯示時依此規則用 `Intl.NumberFormat` 還原。JavaScript `number` 對
+> `0.1 + 0.2` 會誤差，金額用 float 在後台對帳是**直接事故**——整數最小單位與後端 / 資料庫對齊。
 
 ### 2.2 狀態機
 
 ```
-        ┌────────────┐
-        │  pending   │  訂單建立、等待支付
-        └─────┬──────┘
-              │
-     ┌────────┼────────┬─────────┐
-     ▼        ▼        ▼         ▼
-┌─────────┐ ┌──────┐ ┌──────┐  ┌──────────┐
-│ success │ │failed│ │cancel│  │ (timeout │
-└────┬────┘ └──────┘ └──────┘  │  → failed)│
-     │                          └──────────┘
-     ▼
-┌──────────┐
-│ refunded │  僅 success → refunded
-└──────────┘
+              建立
+               │
+            pending
+          /    |    \
+   completed   |   failed
+        │   cancelled
+     refunded
 ```
 
-| 來源 | 終態 | BFF 顯示 |
+| 從 \ 到 | pending | completed | failed | cancelled | refunded |
+|---|---|---|---|---|---|
+| pending | — | ✅ | ✅ | ✅ | ❌ |
+| completed | ❌ | — | ❌ | ❌ | ✅ |
+| failed | ❌ | ❌ | — | ❌ | ❌ |
+| cancelled | ❌ | ❌ | ❌ | — | ❌ |
+| refunded | ❌ | ❌ | ❌ | ❌ | — |
+
+| 來源 | 可轉至 | BFF 顯示 |
 |------|------|---------|
-| pending | success / failed / cancelled | success：綠 tag、可進入退款（v2）；failed：紅 tag、顯示 `failureReason`；cancelled：灰 tag |
-| success | refunded | 紅 tag「已退款」；顯示 `refundedAt` |
+| pending | completed / failed / cancelled | completed：綠 tag；failed：紅 tag；cancelled：灰 tag |
+| completed | refunded | 紅 tag「已退款」 |
 | failed / cancelled / refunded | （終態） | 不可再轉換；BFF 不顯示「重試」之類動作 |
+
+- `failed`、`cancelled`、`refunded` 為**終態**。
+- `cancelled` 用於更正建立錯誤（如金額或玩家填錯）。
+- 合法性由後端 PATCH 強制；非法轉換回 `422 invalid_transition`（見 §4.4）。
 
 **BFF 不做的事**：
 
 - 不過濾 `pending`（即使 pending 超過 24h）——僅顯示 + 由 UI 提示「狀態未完成」
-- 不嘗試補單／重發——非本功能範圍
+- 不在前端推斷或攔截狀態轉換——交由後端 PATCH 驗證
 
 ### 2.3 後端對應與轉換
 
 ```yaml
-# OpenAPI（後端維護）
+# OpenAPI（後端維護於 schema/openapi.yaml）
 components:
   schemas:
-    TopupRecord:
+    DepositRecord:
       type: object
-      required: [record_id, player_id, amount, currency, payment_method, status, created_at]
+      required: [id, player_id, player_name, amount, currency, status, payment_method, created_at, updated_at]
       properties:
-        record_id:        { type: string }
-        player_id:        { type: string }
-        order_id:         { type: string, nullable: true }
-        amount:           { type: integer, format: int64 }
-        currency:         { type: string }
-        payment_method:   { type: string }
-        payment_channel:  { type: string, nullable: true }
-        status:           { type: string, enum: [pending, success, failed, refunded, cancelled] }
-        failure_reason:   { type: string, nullable: true }
-        created_at:       { type: string, format: date-time }
-        paid_at:          { type: string, format: date-time, nullable: true }
-        refunded_at:      { type: string, format: date-time, nullable: true }
+        id:             { type: string, format: uuid }
+        player_id:      { type: string, format: uuid }
+        player_name:    { type: string }
+        amount:         { type: integer, format: int64 }
+        currency:       { type: string }
+        status:         { type: string, enum: [pending, completed, failed, cancelled, refunded] }
+        payment_method: { type: string, enum: [bank_transfer, credit_card, manual, convenience_store, e_wallet] }
+        operator_id:    { type: string, format: uuid }
+        operator_ip:    { type: string }
+        internal_note:  { type: string }
+        display_note:   { type: string }
+        reference_no:   { type: string }
+        created_at:     { type: string, format: date-time }
+        updated_at:     { type: string, format: date-time }
 ```
+
+玩家自助端點（`/api/me/deposit-records`）回傳 `DepositRecordPublic`，**不暴露** `operator_*`、`internal_note`、
+`reference_no`、`player_id`、`player_name`，欄位為 `id` / `amount` / `currency` / `status` / `payment_method` /
+`display_note` / `created_at`。
 
 轉換層放 `src/lib/topups/transform.ts`，規則同 [`05 §2.2`](./05-player-query-domain.md)：snake_case → camelCase、`null` 透傳、不在 transform 層做格式化。
 
@@ -113,42 +144,42 @@ components:
 
 ## 3. 列表查詢
 
+> **實作現況（2026-06）**：為先行開發 CMS 畫面（[`10`](./10-screen-topup-list.md) / [`11`](./11-screen-topup-detail.md)），`lib/topups/{list,get,...}.ts` 目前由**記憶體 mock 資料層**（`src/lib/mock/dataset.ts`）支撐，而非呼叫上游。臨時例外——函式**簽章與回傳型別已對齊本契約**（扁平 `/api/cms/deposit-records`、OFFSET 分頁、`DepositRecord` 欄位、`completed` 狀態），後端就緒後抽換內部 fetch 即可。錯誤態以 id 含 `forbidden`/`notfound`/`ratelimited`/`boom` 觸發（403/404/429/500），供無後端手動驗證 UI；上線前移除。
+
 ### 3.1 端點
 
 ```
-GET /api/v1/players/{player_id}/topups?<query>
+GET /api/cms/deposit-records?<query>          # CMS 列表（全 CMS staff）
 ```
 
-**為何掛在 `/players/{player_id}/topups`** 而非 `/topups?player_id=...`：
+**為何用扁平資源 + `player_id` 篩選**（後端定案）而非 `/players/{id}/topups` 巢狀：
 
-- 強制每筆查詢繫結玩家——URL 結構即表達「不允許跨玩家」
-- 後端權限檢查可用 path 變數做行級授權
-- 與 RESTful resource hierarchy 對齊
+- 後端將儲值紀錄設計為獨立資源 `deposit_records`，CMS 後台需跨玩家檢視（如「列出所有 pending」）
+- 聚焦特定玩家以 `?player_id=<uuid>` query 參數達成，非 path 巢狀
+- 行級授權由 token `claims.utype == cms` + role 控制，不依賴 path 變數
 
-### 3.2 Query 參數
+> 玩家自助端點為 `GET /api/me/deposit-records`，`player_id` 由 token `claims.sub` 自動決定，caller 不可指定——非本 CMS 規格範圍，畫面屬玩家端 app。
 
-| 參數 | 型別 | 必填 | 說明 |
+### 3.2 Query 參數（CMS 列表）
+
+| 參數 | 型別 | 預設 | 說明 |
 |------|------|------|------|
-| `status` | string \| string[] | ❌ | 單值或多值（逗號分隔，如 `status=success,refunded`）；省略=不篩 |
-| `payment_method` | string \| string[] | ❌ | 同上 |
-| `from` | string（ISO 8601 date，UTC） | ❌ | `created_at` 下限（含）；省略=不限 |
-| `to` | string（ISO 8601 date，UTC） | ❌ | `created_at` 上限（含）；省略=不限 |
-| `min_amount` | integer | ❌ | 最小金額（最小貨幣單位） |
-| `max_amount` | integer | ❌ | 最大金額（最小貨幣單位） |
-| `currency` | string | ❌ | 篩選單一幣別 |
-| `sort` | `'created_at_desc' \| 'created_at_asc' \| 'amount_desc' \| 'amount_asc'` | ❌ | 預設 `created_at_desc` |
-| `cursor` | string | ❌ | 後端不透明分頁游標 |
-| `limit` | integer | ❌ | 1–100，預設 `20`；超過上限 BFF 在 400 攔下 |
+| `page` | integer | `1` | 1-based |
+| `page_size` | integer | `20` | 上限 100；> 100 → 400 |
+| `player_id` | string（UUID） | — | 篩特定玩家 |
+| `status` | string（可重複） | — | 可重複出現做 **OR** 篩選（`?status=pending&status=failed`）；每值須在 enum 白名單 |
+| `payment_method` | string（可重複） | — | 同上，可重複做 OR 篩選 |
+| `start_date` | date（`YYYY-MM-DD`） | — | `created_at >= start_date 00:00:00 UTC` |
+| `end_date` | date（`YYYY-MM-DD`） | — | `created_at <= end_date 23:59:59 UTC`；不可早於 `start_date` |
+| `sort` | `'created_at' \| '-created_at' \| 'amount' \| '-amount'` | `-created_at` | 見 §4 |
 
-**多值參數編碼**：逗號分隔（`status=success,refunded`）而非重複 key（`status=success&status=refunded`）——與後端慣例對齊，避免 BFF 兩種格式都要支援。
+**多值參數編碼**：**重複 key**（`?status=pending&status=failed`）而非逗號分隔——對齊後端 OpenAPI（`type: array`，重複出現做 OR）。前端序列化多值篩選時須以重複 key 輸出。
 
 **日期區間驗證**：
 
-- `from > to` → BFF 回 400 `invalid_input`
-- 區間 > 366 天 → BFF 回 400 `invalid_input`，防止 SQL 全表掃描
-- 不允許僅給 `from` 或僅給 `to`（必須成對或皆省略）；單邊區間在後台對帳場景無常見用例，先擋掉避免誤用
-
-> **單邊區間限制可能過嚴**：若客服場景常有「找最近 7 天內某玩家」這類，預設 `from = today - 7d` 比擋掉更友善。實作前與 PM 確認（[§12](#12-開放問題)）。
+- `end_date < start_date` → 後端回 400 `invalid input`；前端亦可先行 client 驗證避免無謂往返
+- 後端以 `start_date` 視為當日 00:00:00 UTC、`end_date` 視為當日 23:59:59 UTC 解讀（含端點）
+- 後端允許僅給單邊（僅 `start_date` 或僅 `end_date`）；前端篩選 UI 仍可選擇成對輸入以簡化操作
 
 ### 3.3 Response
 
@@ -158,46 +189,50 @@ GET /api/v1/players/{player_id}/topups?<query>
 {
   "success": true,
   "request_id": "...",
-  "data": {
-    "records": [
-      {
-        "record_id": "01HXYZ...",
-        "player_id": "01HABCD...",
-        "order_id": "GAME-2026-0001",
-        "amount": 19900,
-        "currency": "TWD",
-        "payment_method": "credit_card",
-        "payment_channel": "stripe",
-        "status": "success",
-        "failure_reason": null,
-        "created_at": "2026-06-20T03:11:22Z",
-        "paid_at": "2026-06-20T03:11:45Z",
-        "refunded_at": null
-      }
-    ],
-    "next_cursor": null
-  }
+  "data": [
+    {
+      "id": "0193b3f4-1234-7abc-9def-000000000001",
+      "player_id": "0193b3f4-1234-7abc-9def-000000000002",
+      "player_name": "玩家小王",
+      "amount": 1000,
+      "currency": "TWD",
+      "status": "completed",
+      "payment_method": "bank_transfer",
+      "operator_id": "0193b3f4-1234-7abc-9def-000000000003",
+      "operator_ip": "192.0.2.1",
+      "internal_note": "客服補單",
+      "display_note": "銀行轉帳儲值",
+      "reference_no": "TXN-20260629-001",
+      "created_at": "2026-06-20T03:11:22Z",
+      "updated_at": "2026-06-20T03:12:00Z"
+    }
+  ],
+  "meta": { "page": 1, "page_size": 20, "total": 137 }
 }
 ```
 
-BFF 對 Browser：解開 envelope + camelCase（同 [`05 §4.3`](./05-player-query-domain.md)）。
+- `data` 為 `DepositRecord` 陣列（直接掛在 envelope `data`，非 `data.records`）。
+- `meta` 含 `page` / `page_size` / `total`（OFFSET 分頁總筆數）。
+- BFF 對 Browser：解開 envelope + camelCase（同 [`05 §4.3`](./05-player-query-domain.md)），`meta` 一併轉為 camelCase。
 
 ### 3.4 BFF 端實作分工
 
 ```
 src/lib/topups/
-├── list.ts              # listTopups(playerId, query): Promise<TopupListResult>
+├── list.ts              # listDeposits(query): Promise<DepositListResult>   // 含 meta {page,pageSize,total}
 ├── list.test.ts
-├── get.ts               # getTopup(playerId, recordId): Promise<TopupRecord>
+├── get.ts               # getDeposit(id): Promise<DepositRecord>
 ├── get.test.ts
-├── summary.ts           # getPlayerTopupSummary(playerId): Promise<TopupSummary>
-├── summary.test.ts
-├── export.ts            # requestExport(playerId, query): Promise<ExportJob>
-├── export.test.ts
+├── create.ts            # createDeposit(input): Promise<DepositRecord>      // POST，admin/user
+├── create.test.ts
+├── update.ts            # updateDeposit(id, input): Promise<DepositRecord>  // PATCH，admin
+├── update.test.ts
 ├── transform.ts
 ├── transform.test.ts
 └── types.ts
 ```
+
+> **實作現況：mock**——`list`/`get`/`create`/`update` 目前由 mock 資料層支撐，簽章與型別已對齊本契約。
 
 ---
 
@@ -205,163 +240,148 @@ src/lib/topups/
 
 | sort 值 | 後端行為 |
 |---------|---------|
-| `created_at_desc`（預設） | 新到舊；同時間以 `record_id desc` 二級排序穩定 |
-| `created_at_asc` | 舊到新 |
-| `amount_desc` | 大額在前；同金額以 `created_at desc` 二級 |
-| `amount_asc` | 小額在前 |
+| `-created_at`（預設） | 新到舊 |
+| `created_at` | 舊到新 |
+| `-amount` | 大額在前 |
+| `amount` | 小額在前 |
 
-- **不允許自定義二級排序鍵**：簡化後端 SQL index 設計
-- **金額排序需指定幣別**？v1 不強制，但跨幣別排序對使用者意義有限——UI 應預先在篩選列提示「先選幣別再用金額排序」
+- sort 白名單由後端驗證；非白名單值回 400 `invalid input`。
+- **金額排序未指定幣別**：後端目前 DB CHECK 僅允許 `TWD`，跨幣別排序問題暫不存在；未來開放多幣別時再評估。
 
 ---
 
-## 5. 分頁
+## 5. 分頁（OFFSET）
 
-同 [`05 §5`](./05-player-query-domain.md)：cursor-based、無總筆數、單頁上限不同（topup 100、player 50）。
+後端採 **OFFSET 分頁**：`page`（1-based）+ `page_size`（上限 100，預設 20），回應 `meta { page, page_size, total }`。
 
-**為何 topup 上限 100 而 player 50**：
-
-- topup 列表是「同一玩家內」分頁，後端可用 `(player_id, created_at)` index 高效翻頁
-- player 搜尋跨平台所有玩家，索引選擇性差，上限更保守
+- 有總筆數 `total`：UI 可顯示「共 N 筆」與頁碼／「載入更多」（`page * page_size < total` 時仍有下一頁）。
+- 前端 `DepositListResult` 應保留 `meta`，供 [`10 §6`](./10-screen-topup-list.md) 分頁判斷。
+- 玩家自助端點 `/api/me/deposit-records` 同為 OFFSET，但 `page_size` 上限 50（降低大量拉取風險）。
 
 ---
 
 ## 6. 單筆明細
 
 ```
-GET /api/v1/players/{player_id}/topups/{record_id}
+GET /api/cms/deposit-records/{id}
 ```
 
-- 回 `TopupRecord` 完整欄位（同 §2.1）
-- 404 `resource not found`：紀錄不存在或 `record_id` 不屬於該 `player_id`（後端統一回 404 不洩漏「存在但跨玩家」）
-- 403 `forbidden`：角色不可查（見 [`07`](./07-admin-rbac-audit.md)）
+- 回 `DepositRecord` 完整欄位（同 §2.1）；path 僅需 `id`（UUID），**不**需 `player_id`。
+- 404 `resource not found`：紀錄不存在。
+- 403 `forbidden`：非 CMS staff（見 [`07`](./07-admin-rbac-audit.md)）。
+
+---
+
+## 6A. 建立（POST）
+
+```
+POST /api/cms/deposit-records          # 權限：admin / user（viewer 不可）
+```
+
+**Request Body**：
+
+```json
+{
+  "player_id":      "0193b3f4-1234-7abc-9def-000000000002",
+  "amount":         1000,
+  "currency":       "TWD",
+  "payment_method": "bank_transfer",
+  "internal_note":  "客服補單，玩家提供匯款收據",
+  "display_note":   "銀行轉帳儲值",
+  "reference_no":   "TXN-20260629-001"
+}
+```
+
+| 欄位 | 必填 | 說明 |
+|------|------|------|
+| `player_id` | ✅ | 必須存在於 members 表 |
+| `amount` | ✅ | 正整數；幣別最小單位（§2.1 規則，TWD=元）|
+| `currency` | ❌ | 預設 `TWD`；3 字元 ISO 4217 |
+| `payment_method` | ✅ | enum 白名單 |
+| `internal_note` | ❌ | 上限 2000；不對玩家顯示 |
+| `display_note` | ❌ | 上限 500 |
+| `reference_no` | ❌ | 上限 128；若提供則檢查唯一性 |
+
+- `status` 固定初始為 `pending`；`player_name` / `operator_id` / `operator_ip` 由 server 填入，caller 不得指定。
+- 回 `201 Created` + `DepositRecord`。
+- 錯誤：`400 invalid input`、`403 forbidden`（viewer）、`404 resource not found`（player_id 不存在）、`409 resource already exists`（reference_no 重複）、`429`。
+
+> 對應前端 `createDeposit(input)`，由螢幕 10「建立儲值」表單呼叫（[`10`](./10-screen-topup-list.md)）。**實作現況：mock**。
+
+---
+
+## 6B. 更新狀態 / 備註（PATCH）
+
+```
+PATCH /api/cms/deposit-records/{id}    # 權限：admin only
+```
+
+**Request Body**（至少提供一欄）：
+
+```json
+{
+  "status":        "completed",
+  "internal_note": "金流商已確認入帳，單號 ABC-123",
+  "display_note":  "儲值已完成"
+}
+```
+
+| 欄位 | 說明 |
+|------|------|
+| `status` | 目標狀態；合法轉換見 §2.2 |
+| `internal_note` | **三態語意**：傳值=設定、`null`=清空、缺席=不修改；上限 2000 |
+| `display_note` | 同上三態語意；上限 500 |
+
+- `amount` / `currency` / `player_id` / `payment_method` 建立後不可修改，PATCH 不接受。
+- 非法狀態轉換回 `422 invalid_transition`。
+- 並發更新採 last-write-wins。
+- 回 `200 OK` + 更新後 `DepositRecord`。
+- 錯誤：`400 invalid input`（空 body）、`403 forbidden`（非 admin）、`404`、`422 invalid_transition`、`429`。
+
+> 對應前端 `updateDeposit(id, input)`。狀態轉換 UI 與權限細節屬後續螢幕規格。**實作現況：mock**。
 
 ---
 
 ## 7. 玩家儲值彙總
 
-### 7.1 端點
+> **後端目前無此端點**：OpenAPI 未提供玩家儲值彙總（summary）端點。先前的 `GET /players/{id}/topups/summary`
+> 與 `TopupSummary` 形狀為前端推測，後端尚未實作。
+>
+> **前端處置**：螢幕 09（[`09`](./09-screen-player-detail.md)）的「儲值彙總卡」**暫以 mock 呈現**；標記為
+> **「待後端新增 summary 端點」**。需向後端要求新增 members 儲值彙總端點後，再回頭定案本節契約形狀
+> （`totalsByCurrency` / `refundRate` 等由後端決定，前端不在 client 算）。
 
-```
-GET /api/v1/players/{player_id}/topups/summary
-```
-
-供玩家詳情頁（[`09`](./09-screen-player-detail.md)）的「儲值彙總卡」使用。
-
-### 7.2 Response
+下方為**待後端確認**的建議形狀（非現行契約）：
 
 ```ts
+// ⚠️ 待後端提供 summary 端點後定案；目前僅供 mock / UI 佔位參考
 type TopupSummary = {
   playerId:            string
   totalsByCurrency: Array<{
     currency:          string
-    successCount:      number        // 成功筆數
-    successAmount:     number        // 成功總額（最小貨幣單位）
+    completedCount:    number        // 完成筆數
+    completedAmount:   number        // 完成總額（最小貨幣單位）
     refundedCount:     number
     refundedAmount:    number
     failedCount:       number
-    refundRate:        number        // refundedAmount / successAmount（後端算好，避免前端浮點誤差）
+    refundRate:        number        // 後端算好，避免前端浮點誤差
   }>
-  firstTopupAt:        string | null  // 首次成功儲值時間
-  lastTopupAt:         string | null  // 最近成功儲值時間
-  lifetimeDays:        number | null  // 從首次到今天的天數，便於「LTV 評估」
+  firstTopupAt:        string | null
+  lastTopupAt:         string | null
+  lifetimeDays:        number | null
 }
 ```
-
-- `refundRate` 由後端計算回傳——前端不在 client 算除法（精度問題 + 各 currency 分母不同）
-- `totalsByCurrency` 為陣列：多幣別玩家分開呈現，不做匯率換算
-
-### 7.3 為何彙總獨立端點
-
-- 彙總在後端可用物化檢視（materialized view）/ 預計算，效能與列表查詢解耦
-- 玩家詳情頁不需要拉全部紀錄就能顯示總額
-- 列表查詢（§3）不附帶彙總，避免每次分頁都重算
 
 ---
 
 ## 8. 匯出 CSV
 
-### 8.1 為何需要 async job 而非同步下載
-
-| 場景 | 適用模式 |
-|------|---------|
-| 結果 ≤ 1000 筆 | **同步**：BFF 直接拉資料、組 CSV、回 `200` + `Content-Disposition: attachment` |
-| 結果 > 1000 筆 | **async job**：BFF 觸發後端 job，回 `202` + `jobId`；前端輪詢狀態，完成後下載 |
-
-> **1000 筆是經驗值**，影響 BFF route handler 的記憶體佔用上限（每筆 ~500 byte → 500KB CSV）。實際門檻在後端決定，BFF 從 OpenAPI schema 取得。
-
-### 8.2 同步匯出端點
-
-```
-GET /api/v1/players/{player_id}/topups/export?<同 §3.2 query>&format=csv
-```
-
-- `format=csv`（v1 唯一支援；XLSX 待 v2）
-- 回 `200 text/csv; charset=utf-8` + `Content-Disposition: attachment; filename="topups-{playerId}-{yyyymmdd}.csv"`
-- BFF Proxy 對此端點**特殊處理**：不嘗試 envelope 解開、原樣透傳 body 與 headers
-
-> **BFF Proxy CSV 透傳例外**：[`01 §4.2`](./01-bff-architecture.md) 預設假設 upstream 為 JSON envelope；CSV 端點需在 Proxy 中辨識（依 `Content-Type` 或 path pattern）並繞過 envelope 拆解。建議於 [`01`](./01-bff-architecture.md) 新增 §「非 JSON 透傳路徑」並補 ADR；本規格暫定 path pattern `/players/*/topups/export` 為白名單。
-
-### 8.3 Async job 端點
-
-```
-POST /api/v1/players/{player_id}/topups/export/async
-Body: { ...same as §3.2 query..., format: "csv" }
-
-→ 202 Accepted
-{ "success": true, "data": { "job_id": "EXP-01HXYZ...", "status": "queued" } }
-```
-
-```
-GET /api/v1/exports/{job_id}
-→ 200
-{ "success": true, "data": {
-    "job_id": "EXP-01HXYZ...",
-    "status": "queued" | "running" | "succeeded" | "failed",
-    "progress": 0..100,
-    "row_count": 12345,           // 完成後
-    "download_url": "https://...",// 完成後；S3 presigned URL，後端產生
-    "expires_at": "..."           // download_url 過期時間
-}}
-```
-
-- **下載走 S3 presigned URL，不經 BFF**：避免 BFF 處理大檔
-- BFF 不快取 `download_url`；每次輪詢從後端取
-- 輪詢間隔由前端控制：建議 backoff `2s, 4s, 8s, ... max 30s`
-
-### 8.4 CSV 欄位
-
-固定順序、UTF-8 BOM 開頭（Excel 中文相容）：
-
-```
-record_id,player_id,order_id,amount,currency,payment_method,payment_channel,status,failure_reason,created_at,paid_at,refunded_at
-```
-
-- 金額**原樣輸出最小貨幣單位整數**（不做小數轉換）——避免 Excel 自動格式化截斷
-- 時間以 ISO 8601 UTC 字串
-- `null` 欄位輸出空字串（不寫 `NULL`）
-- 跳脫：值含 `,` / `"` / `\n` 時以雙引號包裹、內部 `"` 換成 `""`（RFC 4180）
-
-### 8.5 權限與稽核
-
-- 匯出操作觸發後端稽核事件（[`07 §8`](./07-admin-rbac-audit.md) `topups.export`）；事件含：操作者、playerId、篩選條件、預估／實際筆數
-- 部分角色（如「客服-Level 1」）可能不可匯出——後端決定，BFF 不二次檢查
-- 大量匯出可能受後端限流，BFF 透傳 `429 too many requests`
-
-### 8.6 BFF 端實作分工
-
-```ts
-// src/lib/topups/export.ts
-
-// 觸發 async job（前端在「結果預估 > 1000」時呼叫）
-export async function requestExportAsync(playerId: string, query: TopupQuery): Promise<ExportJob>
-
-// 輪詢
-export async function getExportJob(jobId: string): Promise<ExportJob>
-
-// 同步匯出：不在 lib 層提供函式，前端直接 `<a href="/api/players/{id}/topups/export?...">下載</a>`
-// 由 BFF Proxy 透傳 CSV
-```
+> **後端目前無匯出端點**：OpenAPI 未提供任何 CSV / export 端點（同步或 async job 皆無）。
+> 先前 §8 的同步匯出、async job、`/exports/{job_id}` 等皆為前端推測設計，後端尚未實作。
+>
+> **前端處置**：**已移除匯出功能**——螢幕 10（[`10`](./10-screen-topup-list.md)）不再渲染匯出按鈕／Modal，
+> `lib/topups/export.ts` 不再是契約的一部分。標記為**「待後端提供匯出端點」**；屆時再回頭設計
+> 同步 vs async、CSV 欄位、稽核事件（`topups.export`）等。
 
 ---
 
@@ -371,19 +391,21 @@ export async function getExportJob(jobId: string): Promise<ExportJob>
 
 | 條件 | HTTP | error |
 |------|------|-------|
-| `from > to` | 400 | `invalid_input` |
-| 區間 > 366 天 | 400 | `invalid_input` |
-| `limit > 100` 或 `< 1` | 400 | `invalid_input` |
-| `min_amount > max_amount` | 400 | `invalid_input` |
-| 僅給 `from` 或僅給 `to` | 400 | `invalid_input` |
-| `currency` 非 ISO 4217 三字母 | 400 | `invalid_input` |
+| `end_date < start_date` | 400 | `invalid input` |
+| `page_size > 100` 或 `< 1` | 400 | `invalid input` |
+| `status` / `payment_method` 值不在 enum 白名單 | 400 | `invalid input` |
+| `sort` 不在白名單 | 400 | `invalid input` |
+
+> 前端可先行驗證以避免無謂往返；最終仍以後端驗證為準（後端對 query 嚴格驗證）。
 
 ### 9.2 上游透傳
 
 依 [`01 §4.2`](./01-bff-architecture.md) 與 [`05 §7.2`](./05-player-query-domain.md)。常見：
 
-- 403 `forbidden`：角色無權查該玩家／無權匯出
-- 404 `resource not found`：玩家不存在 / record 不存在
+- 403 `forbidden`：非 CMS staff，或 viewer 嘗試 POST / 非 admin 嘗試 PATCH
+- 404 `resource not found`：record 不存在；POST 時 player_id 不存在於 members
+- 409 `resource already exists`：POST 時 reference_no 重複
+- 422 `invalid_transition`：PATCH 非法狀態轉換
 - 429 `too many requests`：限流；含 `Retry-After`
 
 ---
@@ -392,11 +414,11 @@ export async function getExportJob(jobId: string): Promise<ExportJob>
 
 | 規格 | 對接點 |
 |------|-------|
-| [`01-bff-architecture.md`](./01-bff-architecture.md) | 所有 `/api/players/*/topups/*` 走 BFF Proxy；CSV 透傳需新增非 JSON 白名單（§8.2） |
+| [`01-bff-architecture.md`](./01-bff-architecture.md) | 所有 `/api/cms/deposit-records*` 走 BFF Proxy（JSON envelope，無 CSV 透傳例外） |
 | [`02-auth-session.md`](./02-auth-session.md) | session 必須有效；refresh / replay 由 session 層處理 |
-| [`03-observability.md`](./03-observability.md) | metric tag：`route=/api/players/{id}/topups`、`route=/api/players/{id}/topups/export`；redact 規則覆蓋 `amount` 嗎？預設不（金額非個資），但匯出 log 含 query 條件時須注意 |
-| [`05-player-query-domain.md`](./05-player-query-domain.md) | 共享 `playerId` 識別；本規格不重複玩家欄位定義 |
-| [`07-admin-rbac-audit.md`](./07-admin-rbac-audit.md) | 角色與可見欄位（如部分角色看不到 `payment_channel`）；匯出稽核事件 |
+| [`03-observability.md`](./03-observability.md) | metric tag：`route=/api/cms/deposit-records`、`route=/api/cms/deposit-records/{id}`；redact 規則覆蓋 `amount` 嗎？預設不（金額非個資）|
+| [`05-player-query-domain.md`](./05-player-query-domain.md) | 共享 `playerId` 識別；玩家僅以 `player_id` 在 record 內引用（後端補 `player_name`）|
+| [`07-admin-rbac-audit.md`](./07-admin-rbac-audit.md) | 角色：create=admin/user、list/get=全 CMS staff、update=admin；稽核事件 |
 | [`10-screen-topup-list.md`](./10-screen-topup-list.md) | 列表頁 UI；本規格資料層；URL 篩選參數與本規格 §3.2 對齊 |
 | [`11-screen-topup-detail.md`](./11-screen-topup-detail.md) | 明細頁 UI；本規格 §6 是其資料層 |
 
@@ -408,42 +430,36 @@ export async function getExportJob(jobId: string): Promise<ExportJob>
 
 ```ts
 // snake → camel
-it('should map record_id, player_id, payment_method to camelCase')
+it('should map id, player_id, player_name, payment_method to camelCase')
 it('should preserve amount as integer without conversion')
 it('should preserve currency code verbatim (uppercase)')
-it('should map null nullable fields (order_id, payment_channel, failure_reason, paid_at, refunded_at) to null')
-it('should map status enum value through without transformation')
+it('should map nullable fields (operator_id, operator_ip, internal_note, display_note, reference_no) to null when absent')
+it('should map status enum value through without transformation (completed, not success)')
+it('should map updated_at to updatedAt')
 
-// summary
-it('should map totals_by_currency array to totalsByCurrency')
-it('should map refund_rate as number through without rounding')
-it('should preserve null for first_topup_at when player never topped up')
+// list meta
+it('should map meta {page, page_size, total} to camelCase {page, pageSize, total}')
 ```
 
 ### 11.2 `src/lib/topups/list.test.ts`
 
 ```ts
 // query 組合
-it('should call GET /players/{id}/topups with no query params when all filters omitted')
-it('should serialize multi-value status as comma-separated')
-it('should serialize multi-value payment_method as comma-separated')
-it('should default sort to created_at_desc when omitted')
-it('should default limit to 20 when omitted')
+it('should call GET /cms/deposit-records with no query params when all filters omitted')
+it('should serialize multi-value status as repeated keys (?status=pending&status=failed)')
+it('should serialize multi-value payment_method as repeated keys')
+it('should default sort to -created_at when omitted')
+it('should default page to 1 and page_size to 20 when omitted')
+it('should pass player_id through when provided')
 
-// 驗證（BFF 自防）
-it('should throw invalid_input when from > to')
-it('should throw invalid_input when date range exceeds 366 days')
-it('should throw invalid_input when only from is provided without to')
-it('should throw invalid_input when only to is provided without from')
-it('should throw invalid_input when min_amount > max_amount')
-it('should throw invalid_input when limit > 100')
-it('should throw invalid_input when currency is not 3-letter ISO 4217')
-
-// 路徑
-it('should percent-encode playerId in path')
+// 驗證
+it('should throw invalid input when end_date < start_date')
+it('should throw invalid input when page_size > 100')
+it('should throw invalid input when status value is not in enum whitelist')
+it('should throw invalid input when sort is not in whitelist')
 
 // envelope / 錯誤
-it('should return camelCase TopupRecord array on 200')
+it('should return camelCase DepositRecord array plus meta on 200')
 it('should propagate 403 forbidden from upstream')
 it('should propagate 429 with Retry-After')
 it('should NOT include upstream stack in error response')
@@ -452,44 +468,41 @@ it('should NOT include upstream stack in error response')
 ### 11.3 `src/lib/topups/get.test.ts`
 
 ```ts
-it('should call GET /players/{playerId}/topups/{recordId}')
-it('should return camelCase TopupRecord')
+it('should call GET /cms/deposit-records/{id} with id only (no player_id in path)')
+it('should return camelCase DepositRecord')
 it('should propagate 404 resource_not_found from upstream')
 it('should treat "resource not found" (space-form) as same code via normalizeErrorCode')
 ```
 
-### 11.4 `src/lib/topups/summary.test.ts`
+### 11.4 `src/lib/topups/create.test.ts`
 
 ```ts
-it('should call GET /players/{playerId}/topups/summary')
-it('should return camelCase TopupSummary')
-it('should return empty totalsByCurrency array when player has no topups')
-it('should preserve refundRate as-is (no client-side rounding)')
+it('should POST /cms/deposit-records with player_id, amount, payment_method')
+it('should default currency to TWD when omitted')
+it('should NOT send player_name / operator_id / operator_ip (server-filled)')
+it('should return camelCase DepositRecord with status=pending on 201')
+it('should propagate 404 when player_id does not exist')
+it('should propagate 409 resource_already_exists when reference_no duplicates')
+it('should propagate 403 forbidden when caller is viewer')
 ```
 
-### 11.5 `src/lib/topups/export.test.ts`
+### 11.5 `src/lib/topups/update.test.ts`
 
 ```ts
-// async
-it('should POST to /players/{id}/topups/export/async with query in body')
-it('should set format="csv" in body when format not provided')
-it('should return ExportJob with jobId on 202')
-
-// polling
-it('should call GET /exports/{jobId}')
-it('should return downloadUrl when status is succeeded')
-it('should return null downloadUrl when status is queued or running')
-
-// 不在 lib 測試（屬 BFF Proxy 範圍）
-// - 同步 CSV 透傳行為：見 spec 01 §4.3 BFF Proxy 測試（CSV Content-Type 不解 envelope）
+it('should PATCH /cms/deposit-records/{id} with status')
+it('should send internal_note=null to clear, omit field to leave unchanged (three-state)')
+it('should return updated DepositRecord on 200')
+it('should propagate 422 invalid_transition on illegal status change')
+it('should propagate 403 forbidden when caller is not admin')
 ```
 
 ### 11.6 不在本規格的測試
 
-- UI 互動（篩選列、列表、匯出按鈕）→ [`10`](./10-screen-topup-list.md)
+- UI 互動（篩選列、列表、建立表單）→ [`10`](./10-screen-topup-list.md)
 - 明細頁渲染 → [`11`](./11-screen-topup-detail.md)
 - 稽核事件落地 → 後端
 - 角色行為矩陣 → [`07`](./07-admin-rbac-audit.md)
+- 玩家自助端點（`/api/me/deposit-records`）→ 玩家端 app，非本 CMS 規格
 
 ---
 
@@ -497,10 +510,9 @@ it('should return null downloadUrl when status is queued or running')
 
 > 實作前須與後端／PM 對齊：
 
-- [ ] 退款是「同筆 status 變更」還是「另開負金額紀錄」？影響 §2.1 `refundedAt`、§7.2 `refundRate` 計算邏輯、UI 顯示
-- [ ] `from`/`to` 是否允許單邊（如「最近 7 天」場景）？影響 §3.2 BFF 驗證
-- [ ] 同步 vs async 匯出的門檻是 1000 還是別的數值？由後端 OpenAPI 提供
-- [ ] CSV 是否需 XLSX 變體？v1 假設純 CSV
-- [ ] `paymentMethod` enum 完整清單由後端維護，前端不寫死——但 UI 需要對應顯示名稱（「信用卡」/「Apple Pay」），這份對照表放哪？建議放 `lib/topups/labels.ts` 並與 i18n 整合
-- [ ] 匯出 `download_url` TTL 長度？影響使用者體驗（過短會「我剛要下載結果連結過期」）
-- [ ] BFF Proxy 對 CSV 透傳是否新開一支 ADR？建議是（明文化 envelope 例外路徑）
+- [ ] **儲值彙總端點**：後端目前無 summary 端點；§7 形狀為待定。需向後端要求新增 members 儲值彙總端點
+- [ ] **匯出端點**：後端目前無 CSV / export 端點；§8 已移除前端匯出功能。待後端提供後再設計
+- [ ] **玩家搜尋 / 詳情端點**：後端目前無玩家搜尋／詳情端點，玩家僅以 `player_id` 在 record 內引用；影響 [`05`](./05-player-query-domain.md) / [`08`](./08-screen-player-search.md) / [`09`](./09-screen-player-detail.md)
+- [ ] **多幣別**：後端 DB CHECK 目前僅允許 `TWD`；開放 USD / JPY 時需同步更新 §2.1 最小單位顯示規則
+- [ ] `paymentMethod` enum 顯示名稱對照表（「銀行轉帳」/「信用卡」…）放哪？建議 `lib/topups/labels.ts` 並與 i18n 整合
+- [ ] 退款是否區分部分／全額？後端目前僅有 `completed → refunded` 單一轉換，無退款金額欄位

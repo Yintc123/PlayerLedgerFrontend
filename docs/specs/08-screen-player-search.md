@@ -1,5 +1,10 @@
 # 玩家搜尋頁規格書
 
+> **⚠️ 後端目前無玩家搜尋端點（2026-06）**：定案的後端 OpenAPI 未提供 `/api/players/search`
+> （見 [`05`](./05-player-query-domain.md) 頂端 callout）。後端僅以 `player_id` 在 deposit record 內引用玩家
+> （由後端補 `player_name`）。本頁**暫以 mock 呈現**；**需向後端要求新增 members 搜尋端點**後再對接。
+> 端點路徑前綴已更新為無版本號 `/api/...`。
+
 ## 1. 概覽
 
 CMS 後台「玩家搜尋頁」——管理員快速以 playerId / externalId / 暱稱 / Email / 手機定位玩家、進入詳情。
@@ -58,7 +63,8 @@ src/app/(cms)/players/
 │   ├── empty-state.tsx            # 空態（無搜尋 / 無結果）
 │   ├── empty-state.test.tsx
 │   ├── error-state.tsx            # 錯誤態（4xx / 5xx）
-│   └── error-state.test.tsx
+│   ├── error-state.test.tsx
+│   └── load-more.tsx             # 「載入更多」按鈕（Client；§5.3）；分頁以 useTransition + aria-busy；無獨立測試，由 page.test.tsx 覆蓋
 └── _lib/
     ├── query-params.ts            # URL → PlayerSearchQuery 解析與序列化
     ├── query-params.test.ts
@@ -77,9 +83,12 @@ src/app/(cms)/players/
 | `SearchForm` | Client | 受控表單、Enter 提交、欄位互動需 `useState` |
 | `ResultList` | Server | 純展示 props，無互動；放 Server Component 減少 JS bundle |
 | `ResultRow` | Client | 鍵盤選取、hover、`onClick` 導頁需 client |
-| `EmptyState` / `ErrorState` | Server | 純靜態文案；無互動 |
+| `EmptyState` | Client | `no-results` variant 的 CTA 呼叫 `document.getElementById('playerId')?.focus()`（DOM 互動） |
+| `ErrorState` | Client | 使用 `useRouter().refresh()` / 倒數計時器（`rate-limited` variant 以 `setInterval` 自動 retry） |
 
 > **為何 `ResultList` 是 Server 但 `ResultRow` 是 Client**：列表外殼純展示資料；單列需互動（hover、focus、`router.push`）才需 client。Server `ResultList` 接到 Player[] 後 `map` render Client `ResultRow`，這是 RSC + Client 的標準混搭。
+
+> **Next.js 16 `searchParams` 為 Promise**：`page.tsx` 須先 `const resolved = await searchParams` 再交給 `parseSearchQuery` 解析。
 
 ---
 
@@ -105,7 +114,7 @@ src/app/(cms)/players/
 | 按 Enter 或點「搜尋」按鈕 | `router.push(/players?<query>)`——**不打 API**，由 page.tsx 因 URL 變化重新 server-render |
 | 點「清除」按鈕 | `router.push('/players')`，回到「未搜尋」空態 |
 | 至少要填一欄才能提交 | 「搜尋」按鈕在所有欄位 trim 後皆空時 `disabled`；不靠 server 回 400 才提示 |
-| 表單值來源 | initial value 由 URL search params hydrate；之後使用者編輯為 client state |
+| 表單值來源 | initial value 由 URL search params hydrate（Server `page.tsx` 以 `_lib/query-params.parseSearchQuery` 解析 URL，再把結果透過 `initialQuery` prop 傳入 Client `SearchForm`，由其 `useState` 從該 prop 初始化）——避免 client 端 `useSearchParams()` + Suspense；之後使用者編輯為 client state |
 | 提交後不清空欄位 | 保留填入值方便修正再搜 |
 
 ### 4.3 鍵盤
@@ -131,6 +140,10 @@ src/app/(cms)/players/
 | 狀態 | `player.status` | tag 樣式：active=綠 / frozen=橘 / closed=灰 |
 | 註冊時間 | `player.registeredAt` | 顯示為使用者時區的 `YYYY-MM-DD HH:mm`（不顯示秒） |
 | 最近活動 | `player.lastActiveAt` | `null` → `—`；其餘同上 |
+
+> **狀態 tag 為共用 component**：`ResultRow` 不內嵌 tag 樣式，而是 import 共用的 `@/components/players/status-tag`（`PlayerStatusTag`）。CMS 08–11 四個畫面皆需玩家／儲值狀態 tag，已達 [`09 §3.2`](./09-screen-player-detail.md) 預期的「第三處出現即提升」條件，故已從各畫面本地實作提升為共用 component。
+
+> **時間顯示時區（實作補充，全 CMS 共用）**：時間欄位的「使用者時區」由共用 helper `src/lib/format/datetime.ts`（`formatDateTime` / `formatDateTimeSeconds` / `formatShortDateTime`）實作，**固定以 `APP_TIME_ZONE = 'Asia/Taipei'` 顯示**，而非讀瀏覽器系統時區。原因：日期格式化發生在 Client Component（會經 SSR → hydration），若用伺服器系統時區（多為 UTC）與瀏覽器時區會算出不同字串 → React hydration mismatch。本系統為單一地區內部後台，固定台北時區等同「使用者時區」且伺服器／客戶端輸出一致。08 / 09 / 11 各畫面的「使用者時區」時間欄位皆依此。
 
 ### 5.2 互動
 

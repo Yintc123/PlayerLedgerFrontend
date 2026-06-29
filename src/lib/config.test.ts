@@ -95,10 +95,10 @@ describe('config', () => {
       process.env.CLIENT_ID = 'cms-web';
     });
 
-    it('should default API_BASE_PATH to /api/v1 when not set', () => {
+    it('should default API_BASE_PATH to /api when not set (backend dropped /api/v1)', () => {
       delete process.env.API_BASE_PATH;
       const config = createConfig();
-      expect(config.api.basePath).toBe('/api/v1');
+      expect(config.api.basePath).toBe('/api');
     });
 
     it('should default CMS_API_BASE_PATH to /api when not set', () => {
@@ -109,10 +109,10 @@ describe('config', () => {
 
     it('should strip trailing slash from API_BASE_URL and API_BASE_PATH to avoid // collisions', () => {
       process.env.API_BASE_URL = 'http://localhost:8080/';
-      process.env.API_BASE_PATH = '/api/v1/';
+      process.env.API_BASE_PATH = '/api/';
       const config = createConfig();
       expect(config.api.baseUrl).toBe('http://localhost:8080');
-      expect(config.api.basePath).toBe('/api/v1');
+      expect(config.api.basePath).toBe('/api');
     });
 
     it('should strip trailing slash from CMS_API_BASE_PATH to avoid // collisions', () => {
@@ -138,7 +138,7 @@ describe('config', () => {
       expect(config.redis.port).toBe(6379);
       expect(config.redis.password).toBeUndefined();
       expect(config.redis.db).toBe(0);
-      expect(config.api.basePath).toBe('/api/v1');
+      expect(config.api.basePath).toBe('/api');
       expect(config.api.cmsBasePath).toBe('/api');
       expect(config.api.timeoutMs).toBe(20_000);
       expect(config.session.ttlSeconds).toBe(28800);

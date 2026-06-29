@@ -234,7 +234,7 @@ export function useSessionOptional(): ClientSession | null
 
 | 事件 | client session 行為 |
 |------|-------------------|
-| Login 成功 | login page 收到 200 後 `window.location.replace('/' or redirectUrl)`；整頁載入後 layout 重新跑 SSR → fresh `initialSession` |
+| Login 成功 | login page 收到 200 後 `window.location.replace(redirectUrl ?? '/players')`；整頁載入後 layout 重新跑 SSR → fresh `initialSession`。預設落點為 CMS 入口 `/players`（玩家搜尋頁，[`08`](./08-screen-player-search.md)）——本系統無根 `/` 頁 |
 | Logout（手動 / idle / cross-tab） | `window.location.replace('/login?reason=...')`，layout SSR 因 `verifySession` 回 null 而 `redirect('/login')`；client session 隨之消失 |
 | Token refresh（後端 rotation） | **不更新 client session**——`absoluteExpiresAt` rotation 不延長（後端 ADR 007），client 投影本就正確；`accessToken` 不在投影內 |
 | Abs_exp 過期但使用者在頁面上 | idle timer abs_exp short-circuit 觸發 onExpire → 走 logout 路徑（同上） |
@@ -303,6 +303,30 @@ Browser              Next.js BFF                    Redis         API Server
   - 後端 401（invalid credentials） → `INCR login:fail:<usernameHash>` 並 `EXPIRE 900` 若新建（用 Lua 確保 atomic：`EXPIRE NX` 等效；ioredis 寫 `redis.call('INCR', k); if redis.call('TTL', k) < 0 then redis.call('EXPIRE', k, 900) end`）
   - 後端 200（success） → `DEL login:fail:<usernameHash>`（成功登入清除累積，避免合法使用者偶爾打錯被累積到鎖）
   - 後端 5xx / 網路錯誤 → **不動計數**（這不是 credential 錯誤，不應計入 lockout）
+
+> **BFF→Browser 錯誤狀態對應——「契約內透傳、契約外翻譯」（gateway 語意，spec 01 §4.2）：**
+>
+> 核心原則：HTTP 狀態碼描述的是「Browser↔BFF」這一段的關係。`/auth/login` 的 OpenAPI 契約**只文件化 `200 / 400 / 401 / 429`**。
+>
+> - **契約內的客戶端狀態（400 / 401 / 429）→ 原樣透傳**：這些對 Browser「有意義且可處理」（改帳密、改輸入、稍後重試），BFF 帶回上游狀態與 error code。
+> - **契約外的狀態（403 / 404 / 405 / 5xx）、回應非 JSON、或 2xx 但 envelope/JWT 不符契約 → 翻成 `502`**：對「固定上游目標」的 login 呼叫，這些只可能是路由/設定/上游故障，Browser 無從處理。把它們鏡射回去（例如回 404）會**誤導**——`/api/login` 明明存在、使用者也沒做錯。**更不可降級成 500**（500 = BFF 自身崩潰）。
+>
+> | 來源 | BFF 回 Browser | 載體 |
+> |---|---|---|
+> | 後端 401（帳密錯） | `401 { error: <code> }` | `InvalidCredentialsError` |
+> | 後端 429 / account lockout | `429` + `Retry-After` | `LoginError` |
+> | **後端 400（契約內 BadRequest）** | **`400` 透傳上游 error code** | `LoginError`（帶明確 `status: 400`） |
+> | BFF 端 body 驗證失敗（長度等，未打上游） | `400 invalid_input` | `LoginError` |
+> | Redis 故障（fail-closed） | `503 service_unavailable` | `LoginError` |
+> | **後端契約外狀態（403 / 404 / 405 / 5xx）、回應非 JSON、envelope/JWT 契約違反** | **`502 upstream_failure`** | `UpstreamError` |
+> | **網路無法連線 / 逾時** | **`504 upstream_timeout` / `502`** | `UpstreamError`（`timeout` 旗標） |
+> | BFF 自身未預期例外 | `500 server_error` | — |
+>
+> > **為何 404 不鏡射成 404（對比通用 proxy）**：通用 proxy（[`01 §4.2`](./01-bff-architecture.md)）對任意資源路徑**透傳** 4xx，因為那裡的 404 是「使用者查的資源不存在」——契約內、有意義。但 login 是**固定端點呼固定上游路徑**，404 只能代表「上游路徑錯/未部署」（如後端移除 `/api/v1` 後未重啟），契約裡也沒有 404 → 屬 gateway 故障 → 502。判準是「該狀態是否在此端點的契約內、是否對 caller 有意義」，而非「是不是 4xx」。
+>
+> **告警/UX 後果**：502/504 應觸發 on-call（gateway 故障）並讓前端顯示「系統暫時無法處理」；若誤鏡射成 404/500，既不告警、又讓使用者以為自己出錯而無限重試。
+>
+> **防禦式解析**：上游 body 未必是 JSON（如後端 Gin 預設 404 回 `text/plain` `"404 page not found"`）。BFF 須先讀 text 再 `try { JSON.parse }`，**不可直接 `response.json()`**——否則非 JSON body 丟 `SyntaxError`，被誤判為 BFF 500。`lib/auth/login.ts` 以 `UpstreamError`（`code` / `upstreamStatus` / `timeout`）承載 gateway 故障，與 `LoginError`（credential / 契約內客戶端錯誤，可帶明確 `status`）分離。
 3. 解開後端 envelope `{ success, request_id, data }`，從 `data` 取得 token pair：
    - `access_token`、`refresh_token`
    - `expires_in`（秒）→ BFF 計算 `expiresAt = Date.now() + expires_in * 1000`
@@ -315,7 +339,7 @@ Browser              Next.js BFF                    Redis         API Server
 5. **Session fixation 處理：** 不論 incoming `sid` cookie 是否存在 / 合法 → 先 `DEL session:<incomingSid>`（若有），再產生新 sid 寫入（§6.2）
 6. 在 Redis 建立 session，key 為新產生的 sessionId；TTL 取 `min(SESSION_TTL_SECONDS, (absoluteExpiresAt - now) / 1000)`
 7. 回傳給瀏覽器的 body 只含 `{ userId }`，不含任何 token；不轉發後端 `request_id` 到 body（已透過 `X-Request-ID` response header 傳遞）
-8. **Login page client component 在收到 200 後**：呼叫 `createAuthChannel({ onMessage: () => {} }).postLogin(userId)` 廣播 `{ type: 'login', userId, at, nonce }`，**然後** `window.location.replace(redirectUrl ?? '/')`；廣播須在導頁前完成（BroadcastChannel `postMessage` 同步寫入，安全）
+8. **Login page client component 在收到 200 後**：呼叫 `createAuthChannel({ onMessage: () => {} }).postLogin(userId)` 廣播 `{ type: 'login', userId, at, nonce }`，**然後** `window.location.replace(redirectUrl ?? '/players')`；廣播須在導頁前完成（BroadcastChannel `postMessage` 同步寫入，安全）
 
 > **後端欄位命名對應：** 後端 OpenAPI 採 snake_case，BFF 內部型別採 camelCase。轉換層集中在 `lib/auth/login.ts` 與 `lib/auth/refresh.ts`，**不污染 SessionData 結構**。
 
@@ -434,7 +458,7 @@ Browser              Next.js BFF                    Redis         API Server
 3. Loading 期間：兩個 input 與 submit button 全 `disabled`；按鈕文字切「登入中…」並前置 `Loader2` 動畫圖示（圖示 `aria-hidden`）。
 4. 後端回非 2xx：把 `data.message || data.error || '登入失敗'` 寫入 `Alert`（`role="alert"`）；不清空欄位，方便使用者修正再送。
 5. `fetch` 自身 reject（網路斷線）：顯示 `err.message || '網路錯誤'`，同樣走 Alert。
-6. 後端 200：以 `safeRedirectTarget(?redirect=...)` 取目的，呼叫 `window.location.replace(target)`；safeRedirectTarget 規則：必須 `/` 開頭且不可為 `//...`（protocol-relative），否則 fallback `/`，防 open-redirect。
+6. 後端 200：以 `safeRedirectTarget(?redirect=...)` 取目的，呼叫 `window.location.replace(target)`；safeRedirectTarget 規則：必須 `/` 開頭且不可為 `//...`（protocol-relative），否則 fallback `/players`（預設落點，見 [§2.5 client session 行為表](#25-client-session-model)），防 open-redirect。
 7. **不**自己處理 CSRF token：cookie `SameSite=Lax` + `Origin` check 由 BFF 把關（[§6.1](#61-csrf-防護)），UI 層不需動。
 8. **不**廣播 BroadcastChannel：步驟 8 的 `postLogin()` 廣播由 v1 共識「v1 不做 SPA-style cross-tab login sync」延後實作；待 [§5.6](#56-多分頁協調) AuthChannel 落地後再回頭補（[§9 Component 測試](#component-測試react-testing-library)有 TODO 標註）。
 
@@ -1061,7 +1085,7 @@ GET  /api/players            →   GET  {API_BASE_URL}{API_BASE_PATH}/players
 POST /api/players/{id}/topup →   POST {API_BASE_URL}{API_BASE_PATH}/players/{id}/topup
 ```
 
-> **URL 拼接規則**：`API_BASE_URL` 只到 host[:port]、不含路徑前綴；`API_BASE_PATH` 預設 `/api/v1`（對齊後端 OpenAPI `servers`）。Auth、業務 API 都走 `${API_BASE_URL}${API_BASE_PATH}/<path>`；ops 端點（`/health`、`/health/ready`）直接用 `${API_BASE_URL}/<path>`，**不**加 `API_BASE_PATH`。詳見 spec 01 §5。
+> **URL 拼接規則**：`API_BASE_URL` 只到 host[:port]、不含路徑前綴；`API_BASE_PATH` 預設 `/api`（對齊後端 OpenAPI `servers`；後端已移除 `/api/v1` 版本號，auth 與 CMS 共用 `/api`）。Auth、業務 API 都走 `${API_BASE_URL}${API_BASE_PATH}/<path>`；ops 端點（`/health`、`/health/ready`）直接用 `${API_BASE_URL}/<path>`，**不**加 `API_BASE_PATH`。詳見 spec 01 §5。
 
 **Route Handler 職責：**
 
@@ -1141,7 +1165,7 @@ export async function GET(request: NextRequest, ...) {
   if (!accessToken) return Response.json({ error: 'unauthorized' }, { status: 401 })
 
   // 轉發至 API Server，帶 X-Request-ID 供後端 log 串聯
-  // 業務路徑須加 API_BASE_PATH（預設 /api/v1，對齊後端 OpenAPI servers）
+  // 業務路徑須加 API_BASE_PATH（預設 /api，對齊後端 OpenAPI servers）
   const apiResponse = await fetch(`${config.api.baseUrl}${config.api.basePath}/${path}`, {
     headers: {
       Authorization: `Bearer ${accessToken}`,

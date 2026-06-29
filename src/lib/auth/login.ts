@@ -20,7 +20,13 @@ export class LoginError extends Error {
   constructor(
     public backendError: string,
     message: string,
-    public retryAfterSec?: number
+    public retryAfterSec?: number,
+    /**
+     * 明確的對外 HTTP 狀態碼。用於「透傳上游契約內 4xx」（如後端 400 BadRequest）時
+     * 精準帶回上游狀態，而非由 route 依 error code 推斷（code 任意時推斷會錯）。
+     * 未指定時由 route 依 backendError 推導。
+     */
+    public status?: number
   ) {
     super(message);
     this.name = 'LoginError';
@@ -31,6 +37,40 @@ export class InvalidCredentialsError extends LoginError {
   constructor(backendError: string) {
     super(backendError, 'Invalid username or password');
     this.name = 'InvalidCredentialsError';
+  }
+}
+
+/**
+ * 上游（後端 API）層級失敗：網路錯誤、逾時、非預期 HTTP 狀態（如 404 / 5xx）、
+ * 或回應不符契約（envelope / JWT 異常）。**與「帳密錯誤」語意不同**——這類屬 gateway
+ * 失敗，BFF 對 Browser 應回 502（逾時 504），不可降級成 500（BFF 自身崩潰）或 401（帳密錯）。
+ * 對應 spec 01 §4.2 upstream_failure / upstream_timeout。
+ */
+export class UpstreamError extends Error {
+  constructor(
+    public code: string,
+    message: string,
+    public upstreamStatus?: number,
+    public timeout = false
+  ) {
+    super(message);
+    this.name = 'UpstreamError';
+  }
+}
+
+/**
+ * 安全解析上游回應 body：上游錯誤（如 Gin 預設 404 `text/plain` "404 page not found"）
+ * 不保證是 JSON。直接 `response.json()` 會在非 JSON 時丟 SyntaxError，導致 BFF 誤判 500。
+ * 故先讀 text 再嘗試 JSON.parse，失敗回 `{}`，由呼叫端依 HTTP 狀態決定語意。
+ */
+async function parseJsonSafe(response: Response): Promise<Record<string, unknown>> {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    const parsed = JSON.parse(text);
+    return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
   }
 }
 
@@ -115,19 +155,25 @@ export async function login(
 
     clearTimeout(timeoutId);
   } catch (err) {
+    const isTimeout = err instanceof Error && err.name === 'AbortError';
     logger.error(
       {
-        type: 'auth.login.network_error',
+        type: isTimeout ? 'auth.login.upstream_timeout' : 'auth.login.network_error',
         error: err instanceof Error ? err.message : String(err),
         requestId,
       },
-      'Login network error'
+      isTimeout ? 'Login upstream timeout' : 'Login network error'
     );
-    throw new LoginError('upstream_error', err instanceof Error ? err.message : 'Network error');
+    throw new UpstreamError(
+      isTimeout ? 'upstream_timeout' : 'upstream_unreachable',
+      isTimeout ? 'Backend request timed out' : 'Backend unreachable',
+      undefined,
+      isTimeout
+    );
   }
 
-  // 解析回應
-  const body = await response.json();
+  // 解析回應 body — 防禦式解析（上游錯誤未必是 JSON；見 parseJsonSafe）
+  const body = await parseJsonSafe(response);
 
   // 失敗情況 1：401 (invalid credentials)
   if (response.status === 401) {
@@ -156,7 +202,7 @@ export async function login(
       );
     }
 
-    const errorCode = body.error || 'invalid_credentials';
+    const errorCode = (typeof body.error === 'string' && body.error) || 'invalid_credentials';
     logger.warn(
       {
         type: 'auth.login.failure',
@@ -170,17 +216,49 @@ export async function login(
     throw new InvalidCredentialsError(errorCode);
   }
 
-  // 失敗情況 2：5xx
+  // 失敗情況 2：429 限流（後端 rate limit）— 屬可重試的客戶端狀態，透傳 Retry-After
+  if (response.status === 429) {
+    const retryAfterHeader = response.headers.get('Retry-After');
+    const retryAfterSec = retryAfterHeader ? parseInt(retryAfterHeader, 10) : undefined;
+    logger.warn(
+      { type: 'auth.login.rate_limited', requestId, retryAfterSec },
+      'Login rate-limited by upstream'
+    );
+    throw new LoginError(
+      'too_many_requests',
+      'Too many requests, please retry later',
+      Number.isNaN(retryAfterSec as number) ? undefined : retryAfterSec
+    );
+  }
+
+  // 失敗情況 3：400 BadRequest — 屬 /auth/login 契約內的「客戶端錯誤」（OpenAPI 文件化）。
+  // 「契約內透傳」：原樣帶回 400 + 上游 error code，由前端解讀，不藏成 502（spec 02 §3.1）。
+  if (response.status === 400) {
+    const code = (typeof body.error === 'string' && body.error) || 'invalid_input';
+    logger.warn(
+      { type: 'auth.login.bad_request', code, requestId },
+      'Login bad request (passthrough)'
+    );
+    throw new LoginError(code, 'Invalid login request', undefined, 400);
+  }
+
+  // 失敗情況 4：契約外狀態（403 / 404 / 405 / 5xx ...）→ gateway 失敗，回 502（非 500/401）。
+  // 對 login 這種「固定上游目標」的呼叫，契約外狀態只可能代表路由/設定/上游異常，
+  // 對瀏覽器無意義也無法處理（spec 02 §3.1「契約內透傳、契約外翻譯」）。
   if (!response.ok) {
     logger.error(
       {
-        type: 'auth.login.upstream_error',
+        type: 'auth.login.upstream_failure',
         status: response.status,
         requestId,
       },
-      'Login upstream error'
+      'Login upstream returned out-of-contract status'
     );
-    throw new LoginError('upstream_error', `Backend returned ${response.status}`);
+    throw new UpstreamError(
+      'upstream_status',
+      `Backend returned ${response.status}`,
+      response.status
+    );
   }
 
   // 成功登入清除計數
@@ -192,10 +270,14 @@ export async function login(
       { type: 'auth.envelope.parse_error', requestId },
       'Backend response missing envelope data field (upstream contract violation)'
     );
-    throw new LoginError('envelope_missing_data', 'Backend response missing data field');
+    throw new UpstreamError('envelope_missing_data', 'Backend response missing data field');
   }
 
-  const tokenData = body.data;
+  const tokenData = body.data as {
+    access_token?: string;
+    refresh_token?: string;
+    expires_in?: number;
+  };
   const accessToken = tokenData.access_token;
   const refreshToken = tokenData.refresh_token;
   const expiresInSeconds = tokenData.expires_in;
@@ -205,7 +287,7 @@ export async function login(
       { type: 'auth.login.invalid_response', requestId },
       'Backend returned invalid login response'
     );
-    throw new LoginError('upstream_error', 'Backend returned invalid response');
+    throw new UpstreamError('invalid_response', 'Backend returned invalid response');
   }
 
   // userId 從 access token sub claim 取出（RFC 7519；backend schema 無 user_id 欄位）
@@ -221,7 +303,7 @@ export async function login(
       },
       'Backend returned invalid access token JWT (upstream contract violation)'
     );
-    throw new LoginError('upstream_error', 'Backend access token missing sub claim');
+    throw new UpstreamError('invalid_access_jwt', 'Backend access token missing sub claim');
   }
 
   // 從 refresh token JWT 取出 abs_exp（spec §11.1 — malformed 視為後端契約異常 502）
@@ -238,7 +320,7 @@ export async function login(
       },
       'Backend returned invalid refresh token JWT (upstream contract violation)'
     );
-    throw new LoginError('upstream_error', 'Backend refresh token missing abs_exp claim');
+    throw new UpstreamError('invalid_refresh_jwt', 'Backend refresh token missing abs_exp claim');
   }
 
   // Session fixation 防護（§3.1 step 5）：先 best-effort 刪除 incoming sid，再產生新 sid。

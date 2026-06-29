@@ -10,9 +10,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
+// 登入成功的預設落點：CMS 玩家搜尋頁（本系統入口；無根 `/` 頁）。
+const DEFAULT_POST_LOGIN = '/players';
+
 function safeRedirectTarget(raw: string | null): string {
-  if (!raw) return '/';
-  if (!raw.startsWith('/') || raw.startsWith('//')) return '/';
+  if (!raw) return DEFAULT_POST_LOGIN;
+  // 拒絕開放重導（協定相對 `//` 或絕對外部 URL），fall back 回安全預設
+  if (!raw.startsWith('/') || raw.startsWith('//')) return DEFAULT_POST_LOGIN;
   return raw;
 }
 

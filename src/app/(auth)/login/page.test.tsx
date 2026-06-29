@@ -146,7 +146,7 @@ describe('LoginPage', () => {
     expect(alert).toHaveTextContent('offline');
   });
 
-  it('should redirect to "/" by default on successful login', async () => {
+  it('should redirect to "/players" by default on successful login', async () => {
     const user = userEvent.setup();
     mockFetchOk();
 
@@ -155,7 +155,7 @@ describe('LoginPage', () => {
     await user.type(screen.getByLabelText('密碼'), 'secret');
     await user.click(screen.getByRole('button', { name: '登入' }));
 
-    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith('/'));
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith('/players'));
   });
 
   it('should redirect to the safe ?redirect= target after successful login', async () => {
@@ -181,7 +181,7 @@ describe('LoginPage', () => {
     await user.type(screen.getByLabelText('密碼'), 'secret');
     await user.click(screen.getByRole('button', { name: '登入' }));
 
-    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith('/'));
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith('/players'));
   });
 
   it('should reject absolute external redirect targets to prevent open-redirect', async () => {
@@ -194,7 +194,7 @@ describe('LoginPage', () => {
     await user.type(screen.getByLabelText('密碼'), 'secret');
     await user.click(screen.getByRole('button', { name: '登入' }));
 
-    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith('/'));
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith('/players'));
   });
 
   it('should require both username and password to submit (HTML validation)', () => {

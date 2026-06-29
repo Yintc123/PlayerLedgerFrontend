@@ -50,10 +50,16 @@ function isOriginAllowed(request: NextRequest): boolean {
   return appConfig.app.allowedOrigins.has(origin);
 }
 
-function buildCsp(nonce: string): string {
+export function buildCsp(nonce: string): string {
+  // Next.js / React 開發模式（Fast Refresh、callstack 重建等）需要 eval()，
+  // 故 dev 才放行 'unsafe-eval'；production build 一律不含，維持嚴格 CSP。
+  const scriptSrc =
+    process.env.NODE_ENV === 'production'
+      ? `script-src 'self' 'nonce-${nonce}'`
+      : `script-src 'self' 'nonce-${nonce}' 'unsafe-eval'`;
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}'`,
+    scriptSrc,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: https:",
     "font-src 'self'",

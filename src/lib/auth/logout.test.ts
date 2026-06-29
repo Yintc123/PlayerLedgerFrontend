@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@/lib/config', () => ({
   config: {
-    api: { baseUrl: 'http://api:8080', basePath: '/api/v1' },
+    api: { baseUrl: 'http://api:8080', basePath: '/api' },
   },
 }));
 

@@ -1,5 +1,14 @@
 # 玩家查詢業務邏輯規格書
 
+> **⚠️ 後端目前無玩家搜尋 / 玩家詳情端點（2026-06）**：定案的後端 OpenAPI（`schema/openapi.yaml`）
+> **未提供** `/api/players/search` 或 `/api/players/{id}`。後端僅在 deposit record 內以 `player_id`（UUID）引用玩家，
+> 並由後端補上 `player_name` 快照（見 [`06 §2.1`](./06-topup-records-domain.md)）。
+>
+> 本文件描述的玩家搜尋／詳情契約為**前端對後端的需求建議**，目前**尚未實作**；前端螢幕
+> [`08`](./08-screen-player-search.md) / [`09`](./09-screen-player-detail.md) **暫以 mock 呈現**。
+> **需向後端要求新增 members 搜尋／詳情端點**後，再依實際 schema 校正本規格。
+> （端點路徑前綴已更新為無版本號 `/api/...`，對齊後端 v1.12 起移除 `/api/v1` 的決策。）
+
 ## 1. 概覽
 
 本文件定義 CMS 後台「玩家查詢」功能的**業務邏輯層**——即與 UI 無關、純資料與契約面的規格。畫面層規格見 [`08-screen-player-search.md`](./08-screen-player-search.md) 與 [`09-screen-player-detail.md`](./09-screen-player-detail.md)。
@@ -156,10 +165,12 @@ export function toPlayer(api: ApiPlayer): Player {
 ### 4.1 端點
 
 ```
-GET /api/v1/players/search?<query>
+GET /api/players/search?<query>
 ```
 
-> **後端尚未實作**：本端點為新功能契約建議；BFF 在後端確認 schema 前不得 mock 上游或假呼叫。實作時應以 backend schema 為準，本節描述為「我們對後端的要求」。
+> **後端尚未實作**：本端點為新功能契約建議；實作時應以 backend schema 為準，本節描述為「我們對後端的要求」。後端 OpenAPI 目前**無此端點**（見文件頂端 callout）。
+>
+> **實作現況（2026-06，UI-first 階段）**：為先行開發 CMS 畫面（[`08`](./08-screen-player-search.md) / [`09`](./09-screen-player-detail.md)），`lib/players/{search,get}.ts` 目前由**記憶體 mock 資料層**（`src/lib/mock/dataset.ts`）支撐，而非呼叫上游。此為臨時例外——函式**簽章與回傳型別維持本契約不變**，後端就緒後只需抽換內部 fetch 實作、移除 mock，呼叫端（Server Component）不需改動。錯誤態以特殊輸入字串觸發（id 含 `forbidden`/`notfound`/`ratelimited`/`boom` → 403/404/429/500），供無後端時手動驗證 UI；上線前移除。
 
 ### 4.2 Query 參數
 
@@ -250,8 +261,10 @@ src/lib/players/
 ### 4.5 Player 詳情端點
 
 ```
-GET /api/v1/players/{player_id}
+GET /api/players/{player_id}
 ```
+
+> **後端尚未實作**：同 §4.1，後端 OpenAPI 目前無玩家詳情端點（見文件頂端 callout）。
 
 Response（200）：
 

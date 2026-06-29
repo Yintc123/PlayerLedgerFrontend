@@ -4,6 +4,7 @@ import { SESSION_COOKIE_NAME } from '@/lib/session/cookie';
 import { verifySession } from '@/lib/session/session';
 import { decodeAccessToken, type TokenClaims } from '@/lib/auth/decode-token';
 import { SessionProvider, type ClientSession } from '@/lib/session/client-session';
+import { CmsShell } from './_components/cms-shell';
 
 /**
  * 受保護的 layout（CMSWeb 應用）
@@ -46,5 +47,9 @@ export default async function CMSLayout({ children }: { children: React.ReactNod
     role: claims.role,
   };
 
-  return <SessionProvider initialSession={clientSession}>{children}</SessionProvider>;
+  return (
+    <SessionProvider initialSession={clientSession}>
+      <CmsShell>{children}</CmsShell>
+    </SessionProvider>
+  );
 }

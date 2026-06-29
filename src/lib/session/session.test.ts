@@ -4,7 +4,7 @@ vi.mock('@/lib/config', () => ({
   config: {
     api: {
       baseUrl: 'http://localhost:8080',
-      basePath: '/api/v1',
+      basePath: '/api',
       clientId: 'cms-web',
       timeoutMs: 20000,
     },

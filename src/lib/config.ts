@@ -53,8 +53,8 @@ export function createConfig() {
     },
     api: {
       baseUrl: required('API_BASE_URL').replace(/\/$/, ''), // 強制去掉 trailing slash 避免雙 //
-      basePath: (process.env.API_BASE_PATH ?? '/api/v1').replace(/\/$/, ''), // auth endpoint prefix（lib/auth/*.ts 用）；ops 端點不用
-      cmsBasePath: (process.env.CMS_API_BASE_PATH ?? '/api').replace(/\/$/, ''), // CMS 業務 endpoint prefix（catch-all proxy 用，後端無版本號）
+      basePath: (process.env.API_BASE_PATH ?? '/api').replace(/\/$/, ''), // auth endpoint prefix（lib/auth/*.ts 用）；後端已移除 /api/v1，auth 與 CMS 同在 /api
+      cmsBasePath: (process.env.CMS_API_BASE_PATH ?? '/api').replace(/\/$/, ''), // CMS 業務 endpoint prefix（catch-all proxy 用）
       clientId: clientId('CLIENT_ID'), // 啟動時驗證屬於 OpenAPI ClientID enum，fail-fast
       timeoutMs: optionalInt('API_TIMEOUT_MS', 20_000, { min: 1_000, max: 25_000 }),
       // 上界 25000：API Gateway 29 秒上限的安全餘量；超過會被 APIGW 直接砍

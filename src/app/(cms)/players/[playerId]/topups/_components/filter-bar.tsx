@@ -1,0 +1,105 @@
+'use client';
+
+import { useState, type FormEvent } from 'react';
+import { useRouter } from 'next/navigation';
+import { Search, X } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { DEPOSIT_STATUS_OPTIONS, PAYMENT_METHOD_OPTIONS } from '@/lib/topups/labels';
+import type { DepositListQuery, DepositStatus, DepositSort, PaymentMethod } from '../_lib/types';
+import { serializeListQuery } from '../_lib/query-params';
+import { DateRangePicker } from './date-range-picker';
+import { MultiSelect } from './multi-select';
+import { SortSelect } from './sort-select';
+
+const DEFAULT_SORT: DepositSort = '-created_at';
+
+/**
+ * 篩選列（spec 10 §4）。受控草稿狀態；變更不立即送出，
+ * 點「套用」才 router.push 觸發 page.tsx 重新 SSR；「清除」回到預設。
+ */
+export function FilterBar({
+  playerId,
+  initialQuery,
+}: {
+  playerId: string;
+  initialQuery: DepositListQuery;
+}) {
+  const router = useRouter();
+  const base = `/players/${playerId}/topups`;
+
+  const [startDate, setStartDate] = useState(initialQuery.startDate ?? '');
+  const [endDate, setEndDate] = useState(initialQuery.endDate ?? '');
+  const [status, setStatus] = useState<string[]>(initialQuery.status ?? []);
+  const [paymentMethod, setPaymentMethod] = useState<string[]>(initialQuery.paymentMethod ?? []);
+  const [sort, setSort] = useState<DepositSort>(initialQuery.sort ?? DEFAULT_SORT);
+  const [dateValid, setDateValid] = useState(true);
+
+  const buildQuery = (): DepositListQuery => {
+    const q: DepositListQuery = {};
+    if (startDate) q.startDate = startDate;
+    if (endDate) q.endDate = endDate;
+    if (status.length) q.status = status as DepositStatus[];
+    if (paymentMethod.length) q.paymentMethod = paymentMethod as PaymentMethod[];
+    if (sort !== DEFAULT_SORT) q.sort = sort;
+    return q;
+  };
+
+  const handleApply = (e: FormEvent) => {
+    e.preventDefault();
+    if (!dateValid) return;
+    router.push(`${base}${serializeListQuery(buildQuery())}`);
+  };
+
+  const handleClear = () => {
+    setStartDate('');
+    setEndDate('');
+    setStatus([]);
+    setPaymentMethod([]);
+    setSort(DEFAULT_SORT);
+    setDateValid(true);
+    router.push(base);
+  };
+
+  return (
+    <form
+      onSubmit={handleApply}
+      aria-label="儲值紀錄篩選列"
+      className="rounded-xl border bg-white p-4"
+    >
+      <div className="flex flex-wrap items-start gap-3">
+        <DateRangePicker
+          startDate={startDate}
+          endDate={endDate}
+          onChange={(next, valid) => {
+            setStartDate(next.startDate ?? '');
+            setEndDate(next.endDate ?? '');
+            setDateValid(valid);
+          }}
+        />
+        <MultiSelect
+          label="狀態"
+          options={DEPOSIT_STATUS_OPTIONS}
+          selected={status}
+          onChange={setStatus}
+        />
+        <MultiSelect
+          label="支付方式"
+          options={PAYMENT_METHOD_OPTIONS}
+          selected={paymentMethod}
+          onChange={setPaymentMethod}
+        />
+        <SortSelect value={sort} onChange={setSort} />
+      </div>
+      <div className="mt-4 flex items-center gap-2">
+        <Button type="submit" disabled={!dateValid}>
+          <Search className="size-4" aria-hidden="true" />
+          套用
+        </Button>
+        <Button type="button" variant="ghost" onClick={handleClear}>
+          <X className="size-4" aria-hidden="true" />
+          清除
+        </Button>
+      </div>
+    </form>
+  );
+}

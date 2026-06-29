@@ -6,10 +6,22 @@ vi.mock('@/lib/auth/login', () => {
     constructor(
       public backendError: string,
       message: string,
-      public retryAfterSec?: number
+      public retryAfterSec?: number,
+      public status?: number
     ) {
       super(message);
       this.name = 'LoginError';
+    }
+  }
+  class UpstreamError extends Error {
+    constructor(
+      public code: string,
+      message: string,
+      public upstreamStatus?: number,
+      public timeout = false
+    ) {
+      super(message);
+      this.name = 'UpstreamError';
     }
   }
   return {
@@ -19,6 +31,7 @@ vi.mock('@/lib/auth/login', () => {
       absoluteExpiresAt: Date.now() + 3600_000,
     }),
     LoginError,
+    UpstreamError,
   };
 });
 
@@ -93,5 +106,61 @@ describe('POST /api/login response shape (spec 02 §1 + §8)', () => {
 
     expect(res.status).toBe(429);
     expect(res.headers.get('Retry-After')).toBe('600');
+  });
+
+  it('should pass through an in-contract upstream 400 as 400 (LoginError.status), not 502', async () => {
+    const { login, LoginError } = await import('@/lib/auth/login');
+    vi.mocked(login).mockRejectedValueOnce(
+      new (LoginError as unknown as new (
+        b: string,
+        m: string,
+        t: number | undefined,
+        s: number
+      ) => Error)('invalid input', 'Invalid login request', undefined, 400)
+    );
+
+    const req = buildPost({ username: 'alice', password: 'pw1234567890' });
+    const res = await POST(req);
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe('invalid input');
+  });
+
+  it('should return 502 upstream_failure when login throws UpstreamError (e.g. backend 404), NOT 500', async () => {
+    const { login, UpstreamError } = await import('@/lib/auth/login');
+    vi.mocked(login).mockRejectedValueOnce(
+      new (UpstreamError as unknown as new (
+        c: string,
+        m: string,
+        s?: number
+      ) => Error)('upstream_status', 'Backend returned 404', 404)
+    );
+
+    const req = buildPost({ username: 'alice', password: 'pw1234567890' });
+    const res = await POST(req);
+
+    expect(res.status).toBe(502);
+    const body = await res.json();
+    expect(body.error).toBe('upstream_failure');
+    // 不洩漏上游細節
+    expect(JSON.stringify(body)).not.toContain('404');
+  });
+
+  it('should return 504 upstream_timeout when login throws a timeout UpstreamError', async () => {
+    const { login, UpstreamError } = await import('@/lib/auth/login');
+    vi.mocked(login).mockRejectedValueOnce(
+      new (UpstreamError as unknown as new (
+        c: string,
+        m: string,
+        s: number | undefined,
+        t: boolean
+      ) => Error)('upstream_timeout', 'timed out', undefined, true)
+    );
+
+    const req = buildPost({ username: 'alice', password: 'pw1234567890' });
+    const res = await POST(req);
+
+    expect(res.status).toBe(504);
+    expect((await res.json()).error).toBe('upstream_timeout');
   });
 });
