@@ -171,6 +171,19 @@ describe('LoginPage', () => {
     await waitFor(() => expect(replaceMock).toHaveBeenCalledWith('/players'));
   });
 
+  it('should fall back to "/players" when the redirect target is bare "/" (no root screen)', async () => {
+    const user = userEvent.setup();
+    setLocation('?redirect=/');
+    mockFetchOk();
+
+    render(<LoginPage />);
+    await user.type(screen.getByLabelText('帳號'), 'alice');
+    await user.type(screen.getByLabelText('密碼'), 'secret');
+    await user.click(screen.getByRole('button', { name: '登入' }));
+
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith('/players'));
+  });
+
   it('should reject protocol-relative redirect targets to prevent open-redirect', async () => {
     const user = userEvent.setup();
     setLocation('?redirect=//evil.example.com/phish');

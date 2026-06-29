@@ -17,6 +17,8 @@ function safeRedirectTarget(raw: string | null): string {
   if (!raw) return DEFAULT_POST_LOGIN;
   // 拒絕開放重導（協定相對 `//` 或絕對外部 URL），fall back 回安全預設
   if (!raw.startsWith('/') || raw.startsWith('//')) return DEFAULT_POST_LOGIN;
+  // 裸 `/` 是無根畫面（404），導回預設落點（spec 02 §2.5）
+  if (raw === '/') return DEFAULT_POST_LOGIN;
   return raw;
 }
 

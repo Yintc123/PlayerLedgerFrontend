@@ -234,7 +234,7 @@ export function useSessionOptional(): ClientSession | null
 
 | 事件 | client session 行為 |
 |------|-------------------|
-| Login 成功 | login page 收到 200 後 `window.location.replace(redirectUrl ?? '/players')`；整頁載入後 layout 重新跑 SSR → fresh `initialSession`。預設落點為 CMS 入口 `/players`（玩家搜尋頁，[`08`](./08-screen-player-search.md)）——本系統無根 `/` 頁 |
+| Login 成功 | login page 收到 200 後 `window.location.replace(redirectUrl ?? '/players')`；整頁載入後 layout 重新跑 SSR → fresh `initialSession`。預設落點為 CMS 入口 `/players`（玩家搜尋頁，[`08`](./08-screen-player-search.md)）。本系統無根 `/` 畫面，根路由 `app/page.tsx` 為 redirect shim → `redirect('/players')`；直接訪問 `/`（或 `?redirect=/` 落點為裸 `/`）一律導至 `/players` |
 | Logout（手動 / idle / cross-tab） | `window.location.replace('/login?reason=...')`，layout SSR 因 `verifySession` 回 null 而 `redirect('/login')`；client session 隨之消失 |
 | Token refresh（後端 rotation） | **不更新 client session**——`absoluteExpiresAt` rotation 不延長（後端 ADR 007），client 投影本就正確；`accessToken` 不在投影內 |
 | Abs_exp 過期但使用者在頁面上 | idle timer abs_exp short-circuit 觸發 onExpire → 走 logout 路徑（同上） |
@@ -458,7 +458,7 @@ Browser              Next.js BFF                    Redis         API Server
 3. Loading 期間：兩個 input 與 submit button 全 `disabled`；按鈕文字切「登入中…」並前置 `Loader2` 動畫圖示（圖示 `aria-hidden`）。
 4. 後端回非 2xx：把 `data.message || data.error || '登入失敗'` 寫入 `Alert`（`role="alert"`）；不清空欄位，方便使用者修正再送。
 5. `fetch` 自身 reject（網路斷線）：顯示 `err.message || '網路錯誤'`，同樣走 Alert。
-6. 後端 200：以 `safeRedirectTarget(?redirect=...)` 取目的，呼叫 `window.location.replace(target)`；safeRedirectTarget 規則：必須 `/` 開頭且不可為 `//...`（protocol-relative），否則 fallback `/players`（預設落點，見 [§2.5 client session 行為表](#25-client-session-model)），防 open-redirect。
+6. 後端 200：以 `safeRedirectTarget(?redirect=...)` 取目的，呼叫 `window.location.replace(target)`；safeRedirectTarget 規則：必須 `/` 開頭、不可為 `//...`（protocol-relative）、且不可為裸 `/`（無根畫面，否則落點 404），任一不符即 fallback `/players`（預設落點，見 [§2.5 client session 行為表](#25-client-session-model)），防 open-redirect。
 7. **不**自己處理 CSRF token：cookie `SameSite=Lax` + `Origin` check 由 BFF 把關（[§6.1](#61-csrf-防護)），UI 層不需動。
 8. **不**廣播 BroadcastChannel：步驟 8 的 `postLogin()` 廣播由 v1 共識「v1 不做 SPA-style cross-tab login sync」延後實作；待 [§5.6](#56-多分頁協調) AuthChannel 落地後再回頭補（[§9 Component 測試](#component-測試react-testing-library)有 TODO 標註）。
 
