@@ -1235,7 +1235,7 @@ it('should validate requestId: reject string with control characters')
 |------|--------------|
 | 受保護區段 layout，有 `useSession()` 可用 | 掛 provider；effect 內 instantiate timer + channel |
 | 公開區段（`/login`、`/api/health` 等） | **不掛**——這些頁面沒 `SessionProvider`，掛了 `useSession()` 會 throw |
-| `idleConfig.idleTimeoutMs === 0`（如 public-web） | 掛 provider 但 effect 立即 return；不建任何 listener |
+| `idlePolicyFor(session.clientId).idleTimeoutMs === 0`（如 public-web） | 掛 provider 但 effect 立即 return；不建任何 listener |
 | Provider 收到 session 但 `absoluteExpiresAt - now ≤ 0` | timer 啟動後在第一個 tick 即觸發 onExpire（spec 5.5.3 演算法已涵蓋） |
 | Dev 環境 React Strict Mode double mount | effect 的 cleanup 必須讓「卸載 → 重掛」等於「全新初始化」；多次 dispose 安全 |
 
@@ -1352,8 +1352,14 @@ export function createAuthChannel(opts: AuthChannelOpts): AuthChannelHandle
 
 export type IdlePolicy = { idleTimeoutMs: number; warningMs: number }
 
-/** idleTimeoutMs === 0 代表該 client_id 不啟用 idle timer */
-export const idleConfig: IdlePolicy
+/**
+ * 依 client_id 取 idle 政策。`clientId` 由 IdleTimerProvider 從
+ * `useSession().clientId`（§2.5）傳入——**不可**從 `@/lib/config` 讀：
+ * 那是 server-only env（`CLIENT_ID` 無 `NEXT_PUBLIC_` 前綴），且 `config`
+ * 在 client bundle eval 時會因缺 `REDIS_HOST` 等必填 env 直接 throw。
+ * idleTimeoutMs === 0 代表該 client_id 不啟用 idle timer。
+ */
+export function idlePolicyFor(clientId: string): IdlePolicy
 
 
 // ─────────────────────────────────────────────────────────────────────
@@ -1363,7 +1369,7 @@ export const idleConfig: IdlePolicy
 
 export type IdleTimerProviderProps = {
   children: React.ReactNode
-  /** 測試 / Storybook 可覆寫，預設讀 idleConfig */
+  /** 測試 / Storybook 可覆寫，預設 idlePolicyFor(useSession().clientId) */
   policyOverride?: IdlePolicy
 }
 
@@ -1513,19 +1519,21 @@ sendLogout():
 不暴露為 env var，理由：閒置時長是 client policy（後端 ADR 007 規定 cms-web 必須 15 分鐘），env 改動會偏離 policy 紀律。
 
 ```ts
-// src/lib/idle/idle-config.ts
-import { config } from '@/lib/config'
+// src/lib/idle/idle-config.ts — 純 client 模組，**不** import server-only @/lib/config
 
-const POLICIES: Record<string, { idleTimeoutMs: number; warningMs: number }> = {
+const POLICIES: Record<string, IdlePolicy> = {
   'cms-web':    { idleTimeoutMs: 15 * 60_000, warningMs: 30_000 },
   'public-web': { idleTimeoutMs:  0,          warningMs: 0      },   // 0 = 不掛 timer
   // mobile / ios-app 不適用（不走 web）
 }
 
-export const idleConfig = POLICIES[config.api.clientId] ?? POLICIES['cms-web']
+/** clientId 由 IdleTimerProvider 從 useSession().clientId（§2.5）傳入 */
+export function idlePolicyFor(clientId: string): IdlePolicy {
+  return POLICIES[clientId] ?? POLICIES['cms-web']
+}
 ```
 
-`idleTimeoutMs === 0` → `IdleTimerProvider` 立即 early-return，不掛任何 listener（public-web 場景）。
+`idlePolicyFor(session.clientId).idleTimeoutMs === 0` → `IdleTimerProvider` 立即 early-return，不掛任何 listener（public-web 場景）。
 
 ### 5.5.8 SSR / hydration 規約
 
@@ -1542,17 +1550,20 @@ export const idleConfig = POLICIES[config.api.clientId] ?? POLICIES['cms-web']
 
 ```ts
 // 示意：provider 的 effect 樣板
-useEffect(() => {
-  if (idleConfig.idleTimeoutMs === 0) return                  // public-web no-op
+// Hooks 必須在元件頂層呼叫（Rules of Hooks）——不可在 useEffect 內叫 useSession
+const session = useSession()                                  // 必在 SessionProvider 內
+const policy  = props.policyOverride ?? idlePolicyFor(session.clientId)
 
-  const session = useSession()                                  // 必在 SessionProvider 內
+useEffect(() => {
+  if (policy.idleTimeoutMs === 0) return                      // public-web no-op
+
   const channel = createAuthChannel({
     currentSession: { createdAt: session.createdAt, userId: session.userId },
     onMessage: handleMessage,
   })
   const timer = createIdleTimer({
-    idleTimeoutMs:     idleConfig.idleTimeoutMs,
-    warningMs:         idleConfig.warningMs,
+    idleTimeoutMs:     policy.idleTimeoutMs,
+    warningMs:         policy.warningMs,
     absoluteExpiresAt: session.absoluteExpiresAt,
     onEvent:           handleTimerEvent,
   })
@@ -2142,7 +2153,8 @@ it('should feature-detect BroadcastChannel and become a no-op when undefined')
 // — listener 掛載 / 卸載
 it('should attach passive listeners on mount and detach on unmount')
 it('should use AbortController.signal so all listeners are cleaned up together')
-it('should NOT mount when idleConfig.idleTimeoutMs === 0 (public-web)')
+it('should NOT mount when idlePolicyFor(clientId).idleTimeoutMs === 0 (public-web)')
+it('should select policy from useSession().clientId (not from server-only @/lib/config)')
 
 // — 事件路徑
 it('should reset timer on any of [mousemove, mousedown, keydown, wheel, touchstart, scroll]')
