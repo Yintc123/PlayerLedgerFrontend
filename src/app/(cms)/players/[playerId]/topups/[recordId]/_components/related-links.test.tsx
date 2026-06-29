@@ -7,7 +7,10 @@ import { RelatedLinks } from './related-links';
 describe('RelatedLinks', () => {
   it('should render link to /players/[playerId]', () => {
     render(<RelatedLinks playerId="01HABC" />);
-    expect(screen.getByRole('link', { name: '玩家詳情' })).toHaveAttribute('href', '/players/01HABC');
+    expect(screen.getByRole('link', { name: '玩家詳情' })).toHaveAttribute(
+      'href',
+      '/players/01HABC'
+    );
   });
 
   it('should render link to /players/[playerId]/topups', () => {

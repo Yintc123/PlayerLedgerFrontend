@@ -11,11 +11,7 @@
 export type DepositStatus = 'pending' | 'completed' | 'failed' | 'cancelled' | 'refunded';
 
 export type PaymentMethod =
-  | 'bank_transfer'
-  | 'credit_card'
-  | 'manual'
-  | 'convenience_store'
-  | 'e_wallet';
+  'bank_transfer' | 'credit_card' | 'manual' | 'convenience_store' | 'e_wallet';
 
 /** 排序：對齊後端 enum（欄位名 + 前綴 `-` 為降冪）。預設 `-created_at`。 */
 export type DepositSort = 'created_at' | '-created_at' | 'amount' | '-amount';

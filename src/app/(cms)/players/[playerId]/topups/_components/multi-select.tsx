@@ -24,9 +24,7 @@ export function MultiSelect({
   const listRef = useRef<HTMLDivElement>(null);
 
   const toggle = (value: string) => {
-    onChange(
-      selected.includes(value) ? selected.filter((v) => v !== value) : [...selected, value]
-    );
+    onChange(selected.includes(value) ? selected.filter((v) => v !== value) : [...selected, value]);
   };
 
   const selectedOptions = options.filter((o) => selected.includes(o.value));

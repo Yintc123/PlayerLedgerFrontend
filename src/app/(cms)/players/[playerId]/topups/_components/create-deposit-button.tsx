@@ -14,10 +14,7 @@ export function CreateDepositButton({ playerId }: { playerId: string }) {
   if (role !== 'admin' && role !== 'user') return null;
 
   return (
-    <a
-      href={`/players/${playerId}/topups/new`}
-      className={cn(buttonVariants({ size: 'sm' }))}
-    >
+    <a href={`/players/${playerId}/topups/new`} className={cn(buttonVariants({ size: 'sm' }))}>
       <Plus className="size-4" aria-hidden="true" />
       建立儲值
     </a>

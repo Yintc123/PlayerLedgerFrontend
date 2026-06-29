@@ -283,9 +283,11 @@ describe('login (§5.1)', () => {
   it('should NOT INCR lockout counter on backend 400 (not a credential failure)', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ error: 'invalid input' }), { status: 400 })
-      )
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ error: 'invalid input' }), { status: 400 })
+        )
     );
 
     await login({ username: 'alice', password: 'pw1234567890' }).catch(() => {});
@@ -295,10 +297,7 @@ describe('login (§5.1)', () => {
   });
 
   it('should throw UpstreamError on backend 5xx', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(new Response('', { status: 502 }))
-    );
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 502 })));
 
     const err = await login({ username: 'alice', password: 'pw1234567890' }).catch((e) => e);
     expect(err).toBeInstanceOf(UpstreamError);

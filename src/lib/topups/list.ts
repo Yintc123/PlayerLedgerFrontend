@@ -5,7 +5,12 @@
  * 介面（input/output 型別）對齊後端契約；後端就緒後抽換內部即可。
  */
 import { ApiError } from '@/lib/api/errors';
-import { mockTopupsFor, MOCK_ALL_DEPOSITS, errorTriggerFor, MOCK_PLAYERS } from '@/lib/mock/dataset';
+import {
+  mockTopupsFor,
+  MOCK_ALL_DEPOSITS,
+  errorTriggerFor,
+  MOCK_PLAYERS,
+} from '@/lib/mock/dataset';
 import { listCreatedDeposits } from './create';
 import type { DepositListQuery, DepositListResult, DepositRecord } from './types';
 

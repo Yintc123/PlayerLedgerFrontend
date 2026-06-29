@@ -15,12 +15,13 @@ function matches(player: Player, query: PlayerSearchQuery): boolean {
   const conds: boolean[] = [];
   if (query.playerId) conds.push(player.playerId === query.playerId.trim());
   if (query.externalId) conds.push(player.externalId === query.externalId.trim());
-  if (query.displayName)
-    conds.push(player.displayName.startsWith(query.displayName.trim())); // 前綴模糊
+  if (query.displayName) conds.push(player.displayName.startsWith(query.displayName.trim())); // 前綴模糊
   if (query.email)
     conds.push((player.email ?? '').toLowerCase().includes(query.email.trim().toLowerCase()));
   if (query.phone)
-    conds.push((player.phone ?? '').replace(/[\s()-]/g, '').includes(query.phone.replace(/[\s()-]/g, '')));
+    conds.push(
+      (player.phone ?? '').replace(/[\s()-]/g, '').includes(query.phone.replace(/[\s()-]/g, ''))
+    );
   // AND 組合：所有提供的欄位都須滿足
   return conds.length > 0 && conds.every(Boolean);
 }

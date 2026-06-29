@@ -9,7 +9,10 @@ describe('DateRangePicker', () => {
     const onChange = vi.fn();
     render(<DateRangePicker onChange={onChange} />);
     fireEvent.change(screen.getByLabelText('起始日'), { target: { value: '2026-06-10' } });
-    expect(onChange).toHaveBeenLastCalledWith({ startDate: '2026-06-10', endDate: undefined }, true);
+    expect(onChange).toHaveBeenLastCalledWith(
+      { startDate: '2026-06-10', endDate: undefined },
+      true
+    );
   });
 
   it('should show inline error when startDate > endDate', () => {

@@ -54,13 +54,7 @@ export default async function TopupDetailPage({
   return <TopupDetail playerId={playerId} recordId={recordId} />;
 }
 
-export async function TopupDetail({
-  playerId,
-  recordId,
-}: {
-  playerId: string;
-  recordId: string;
-}) {
+export async function TopupDetail({ playerId, recordId }: { playerId: string; recordId: string }) {
   let record;
   try {
     record = await getDeposit(recordId);

@@ -32,10 +32,7 @@ export async function createDeposit(input: CreateDepositInput): Promise<DepositR
   }
 
   // reference_no 唯一性（後端 409）
-  if (
-    input.referenceNo &&
-    [...created].some((r) => r.referenceNo === input.referenceNo)
-  ) {
+  if (input.referenceNo && [...created].some((r) => r.referenceNo === input.referenceNo)) {
     throw new ApiError(409, 'resource_already_exists', 'reference_no 已被其他紀錄使用');
   }
 

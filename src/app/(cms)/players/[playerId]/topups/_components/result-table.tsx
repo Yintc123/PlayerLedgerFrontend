@@ -14,13 +14,7 @@ const COLUMNS: ReadonlyArray<{ key: string; label: string; align?: 'right' }> = 
 /**
  * 結果表（spec 10 §5.1）。Server Component：純展示，map 出 Client ResultRow。
  */
-export function ResultTable({
-  records,
-  playerId,
-}: {
-  records: DepositRecord[];
-  playerId: string;
-}) {
+export function ResultTable({ records, playerId }: { records: DepositRecord[]; playerId: string }) {
   return (
     <div className="overflow-x-auto rounded-xl border bg-white">
       <table className="w-full border-collapse text-left">

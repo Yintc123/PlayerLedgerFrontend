@@ -264,8 +264,7 @@ export function errorTriggerFor(value: string | undefined): ApiError | null {
   const v = value.toLowerCase();
   if (v.includes('forbidden')) return new ApiError(403, 'forbidden', '您的角色無權使用此功能');
   if (v.includes('notfound')) return new ApiError(404, 'resource_not_found', '找不到資源');
-  if (v.includes('ratelimited'))
-    return new ApiError(429, 'too_many_requests', '請求過於頻繁', 10);
+  if (v.includes('ratelimited')) return new ApiError(429, 'too_many_requests', '請求過於頻繁', 10);
   if (v.includes('boom')) return new ApiError(500, 'upstream_failure', '伺服器錯誤');
   return null;
 }

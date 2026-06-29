@@ -20,7 +20,9 @@ describe('MultiSelect', () => {
   });
 
   it('should render selected chips inside the trigger', () => {
-    render(<MultiSelect label="狀態" options={OPTIONS} selected={['success']} onChange={() => {}} />);
+    render(
+      <MultiSelect label="狀態" options={OPTIONS} selected={['success']} onChange={() => {}} />
+    );
     expect(within(screen.getByRole('button')).getByText('成功')).toBeInTheDocument();
   });
 

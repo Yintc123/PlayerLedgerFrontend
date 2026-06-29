@@ -14,13 +14,7 @@ import type { DepositRecord } from '@/lib/topups/types';
  * 列本身為 `role="listitem"` 並用 `router.push` 導頁；內含真實 `<a href>`（display:contents）
  * 以保留語意連結（漸進增強 / 無 JS 時可用），其 click 由外層攔截避免雙重導頁。
  */
-export function RecentTopupRow({
-  playerId,
-  record,
-}: {
-  playerId: string;
-  record: DepositRecord;
-}) {
+export function RecentTopupRow({ playerId, record }: { playerId: string; record: DepositRecord }) {
   const router = useRouter();
   const href = `/players/${playerId}/topups/${record.id}`;
 

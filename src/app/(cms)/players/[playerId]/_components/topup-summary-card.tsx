@@ -59,13 +59,17 @@ function CurrencySubCard({ totals }: { totals: CurrencyTotals }) {
       <h3 className="font-mono text-sm font-semibold">{totals.currency}</h3>
       <dl className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
         <dt className="text-muted-foreground">成功總額</dt>
-        <dd className="text-right tabular-nums">{formatAmount(totals.successAmount, totals.currency)}</dd>
+        <dd className="text-right tabular-nums">
+          {formatAmount(totals.successAmount, totals.currency)}
+        </dd>
 
         <dt className="text-muted-foreground">成功筆數</dt>
         <dd className="text-right tabular-nums">{totals.successCount}</dd>
 
         <dt className="text-muted-foreground">退款總額</dt>
-        <dd className="text-right tabular-nums">{formatAmount(totals.refundedAmount, totals.currency)}</dd>
+        <dd className="text-right tabular-nums">
+          {formatAmount(totals.refundedAmount, totals.currency)}
+        </dd>
 
         <dt className="text-muted-foreground">退款率</dt>
         <dd className="flex items-center justify-end gap-2">

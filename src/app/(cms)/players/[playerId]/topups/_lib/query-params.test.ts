@@ -73,7 +73,10 @@ describe('parseListQuery', () => {
 
 describe('serializeListQuery', () => {
   it('should serialize multi-value as REPEATED keys (not comma)', () => {
-    const out = serializeListQuery({ status: ['pending', 'failed'], paymentMethod: ['credit_card'] });
+    const out = serializeListQuery({
+      status: ['pending', 'failed'],
+      paymentMethod: ['credit_card'],
+    });
     expect(out).toContain('status=pending');
     expect(out).toContain('status=failed');
     expect(out).not.toContain('%2C'); // no comma

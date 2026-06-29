@@ -32,9 +32,7 @@ export function Pagination({
 
   const handleClick = () => {
     startTransition(() => {
-      router.push(
-        `/players/${playerId}/topups${serializeListQuery({ ...query, page: page + 1 })}`
-      );
+      router.push(`/players/${playerId}/topups${serializeListQuery({ ...query, page: page + 1 })}`);
     });
   };
 

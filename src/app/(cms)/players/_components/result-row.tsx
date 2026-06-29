@@ -67,10 +67,7 @@ export function ResultRow({ player }: { player: Player }) {
     >
       <div className="min-w-0">
         <div className="truncate font-medium">{player.displayName}</div>
-        <div
-          className="text-muted-foreground truncate font-mono text-xs"
-          title={player.playerId}
-        >
+        <div className="text-muted-foreground truncate font-mono text-xs" title={player.playerId}>
           {player.playerId}
         </div>
       </div>

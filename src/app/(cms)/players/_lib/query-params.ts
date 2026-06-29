@@ -6,7 +6,14 @@ import type { PlayerSearchQuery } from './types';
 
 type ParamsLike = { get(name: string): string | null };
 
-const STRING_FIELDS = ['playerId', 'externalId', 'displayName', 'email', 'phone', 'cursor'] as const;
+const STRING_FIELDS = [
+  'playerId',
+  'externalId',
+  'displayName',
+  'email',
+  'phone',
+  'cursor',
+] as const;
 const SEARCH_FIELDS = ['playerId', 'externalId', 'displayName', 'email', 'phone'] as const;
 
 function nonEmpty(value: string | null): string | undefined {

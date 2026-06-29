@@ -111,12 +111,14 @@ describe('POST /api/login response shape (spec 02 §1 + §8)', () => {
   it('should pass through an in-contract upstream 400 as 400 (LoginError.status), not 502', async () => {
     const { login, LoginError } = await import('@/lib/auth/login');
     vi.mocked(login).mockRejectedValueOnce(
-      new (LoginError as unknown as new (
-        b: string,
-        m: string,
-        t: number | undefined,
-        s: number
-      ) => Error)('invalid input', 'Invalid login request', undefined, 400)
+      new (
+        LoginError as unknown as new (
+          b: string,
+          m: string,
+          t: number | undefined,
+          s: number
+        ) => Error
+      )('invalid input', 'Invalid login request', undefined, 400)
     );
 
     const req = buildPost({ username: 'alice', password: 'pw1234567890' });
@@ -129,11 +131,11 @@ describe('POST /api/login response shape (spec 02 §1 + §8)', () => {
   it('should return 502 upstream_failure when login throws UpstreamError (e.g. backend 404), NOT 500', async () => {
     const { login, UpstreamError } = await import('@/lib/auth/login');
     vi.mocked(login).mockRejectedValueOnce(
-      new (UpstreamError as unknown as new (
-        c: string,
-        m: string,
-        s?: number
-      ) => Error)('upstream_status', 'Backend returned 404', 404)
+      new (UpstreamError as unknown as new (c: string, m: string, s?: number) => Error)(
+        'upstream_status',
+        'Backend returned 404',
+        404
+      )
     );
 
     const req = buildPost({ username: 'alice', password: 'pw1234567890' });
@@ -149,12 +151,14 @@ describe('POST /api/login response shape (spec 02 §1 + §8)', () => {
   it('should return 504 upstream_timeout when login throws a timeout UpstreamError', async () => {
     const { login, UpstreamError } = await import('@/lib/auth/login');
     vi.mocked(login).mockRejectedValueOnce(
-      new (UpstreamError as unknown as new (
-        c: string,
-        m: string,
-        s: number | undefined,
-        t: boolean
-      ) => Error)('upstream_timeout', 'timed out', undefined, true)
+      new (
+        UpstreamError as unknown as new (
+          c: string,
+          m: string,
+          s: number | undefined,
+          t: boolean
+        ) => Error
+      )('upstream_timeout', 'timed out', undefined, true)
     );
 
     const req = buildPost({ username: 'alice', password: 'pw1234567890' });

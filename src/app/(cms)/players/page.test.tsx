@@ -53,7 +53,10 @@ describe('PlayersResult', () => {
   });
 
   it('should render ResultList when searchPlayers returns players', async () => {
-    searchPlayersMock.mockResolvedValue({ players: [makePlayer('a'), makePlayer('b')], nextCursor: null });
+    searchPlayersMock.mockResolvedValue({
+      players: [makePlayer('a'), makePlayer('b')],
+      nextCursor: null,
+    });
     render(await PlayersResult({ query: { displayName: '玩' } }));
     expect(screen.getAllByRole('listitem')).toHaveLength(2);
   });

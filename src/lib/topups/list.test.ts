@@ -72,7 +72,11 @@ describe('createDeposit (mock)', () => {
 
   it('should throw 404 when player_id is not a known member', async () => {
     await expect(
-      createDeposit({ playerId: '00000000-0000-0000-0000-000000000000', amount: 1, paymentMethod: 'manual' })
+      createDeposit({
+        playerId: '00000000-0000-0000-0000-000000000000',
+        amount: 1,
+        paymentMethod: 'manual',
+      })
     ).rejects.toMatchObject({ status: 404 });
   });
 

@@ -37,7 +37,9 @@ export async function PlayerDetail({ playerId }: { playerId: string }) {
       }
     }
     // 5xx / 未預期 → 冒泡至 error.tsx
-    recordMetric('players.detail.error', { code: isApiError(err) ? String(err.status) : 'unknown' });
+    recordMetric('players.detail.error', {
+      code: isApiError(err) ? String(err.status) : 'unknown',
+    });
     throw err;
   }
 

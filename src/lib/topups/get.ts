@@ -13,8 +13,7 @@ export async function getDeposit(id: string): Promise<DepositRecord> {
   if (trigger) throw trigger;
 
   const record =
-    MOCK_ALL_DEPOSITS.find((r) => r.id === id) ??
-    listCreatedDeposits().find((r) => r.id === id);
+    MOCK_ALL_DEPOSITS.find((r) => r.id === id) ?? listCreatedDeposits().find((r) => r.id === id);
   if (!record) {
     throw new ApiError(404, 'resource_not_found', '找不到此筆紀錄');
   }
