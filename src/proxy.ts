@@ -61,7 +61,8 @@ function buildCsp(nonce: string): string {
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",
-    'upgrade-insecure-requests',
+    // upgrade-insecure-requests 只在 HTTPS 環境啟用（PoC HTTP-only 時開啟會讓瀏覽器升級 https → 連不到）
+    ...(process.env.ENABLE_HSTS === 'true' ? ['upgrade-insecure-requests'] : []),
     'report-uri /api/csp-report',
     'report-to csp-endpoint',
   ].join('; ');
