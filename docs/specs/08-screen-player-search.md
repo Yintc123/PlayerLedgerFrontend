@@ -1,9 +1,9 @@
 # 玩家搜尋頁規格書
 
-> **⚠️ 後端目前無玩家搜尋端點（2026-06）**：定案的後端 OpenAPI 未提供 `/api/players/search`
-> （見 [`05`](./05-player-query-domain.md) 頂端 callout）。後端僅以 `player_id` 在 deposit record 內引用玩家
-> （由後端補 `player_name`）。本頁**暫以 mock 呈現**；**需向後端要求新增 members 搜尋端點**後再對接。
-> 端點路徑前綴已更新為無版本號 `/api/...`。
+> **✅ 後端已提供搜尋端點（2026-06-29）**：後端 OpenAPI 已定案 `GET /api/cms/players`，本頁的搜尋資料層
+> 可由 mock **抽換為真實串接**（`cmsRequest('/cms/players')`，見 [`05`](./05-player-query-domain.md) 已對齊規格）。
+> 搜尋語意（email 前綴 lowercase、phone E.164、暱稱前綴 NFC）由後端執行；viewer 角色的 email/phone 遮罩亦在後端。
+> 本頁 UI 規格（表單、結果列表、空態、ErrorState variant）不受抽換影響——`searchPlayers` 簽章與回傳型別不變。
 
 ## 1. 概覽
 

@@ -1,11 +1,10 @@
 # 玩家詳情頁規格書
 
-> **⚠️ 後端目前無玩家詳情 / 儲值彙總端點（2026-06）**：定案的後端 OpenAPI 未提供 `/api/players/{id}`，
-> 亦**無玩家儲值彙總（summary）端點**（見 [`05`](./05-player-query-domain.md) 頂端 callout 與 [`06 §7`](./06-topup-records-domain.md)）。
-> 後端僅以 `player_id` 在 deposit record 內引用玩家（由後端補 `player_name`）。
-> 本頁的「基本資料卡」與「儲值彙總卡」**暫以 mock 呈現**；**需向後端要求新增 members 詳情 + 儲值彙總端點**後再對接。
-> 「最近紀錄」區塊可改打扁平 `GET /api/cms/deposit-records?player_id=<id>`（[`06`](./06-topup-records-domain.md)），但 summary 仍需後端補端點。
-> 端點路徑前綴已更新為無版本號 `/api/...`。
+> **部分對齊後端（2026-06-29）**：後端已提供 `GET /api/cms/players/{id}`，本頁「基本資料卡」可由 mock
+> **抽換為真實串接**（`getPlayer` → `cmsRequest('/cms/players/{id}')`，見 [`05`](./05-player-query-domain.md) 已對齊規格）。
+> 「最近紀錄」區塊打扁平 `GET /api/cms/deposit-records?player_id=<id>`（[`06`](./06-topup-records-domain.md)）。
+> **「儲值彙總卡」仍無後端端點 → 維持 mock**（`getPlayerTopupSummary`，見 [`06 §7`](./06-topup-records-domain.md)）。
+> 注意 `last_active_at` 本期恆為 `null`、`status` 本期恆為 `active`，UI 須能處理。
 
 ## 1. 概覽
 

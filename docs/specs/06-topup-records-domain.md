@@ -416,9 +416,9 @@ type TopupSummary = {
 
 | 規格 | 對接點 |
 |------|-------|
-| [`01-bff-architecture.md`](./01-bff-architecture.md) | 所有 `/api/cms/deposit-records*` 走 BFF Proxy（JSON envelope，無 CSV 透傳例外） |
+| [`01-bff-architecture.md`](./01-bff-architecture.md) | 資料由 RSC 頁面（`deposit-records/page.tsx`、`players/[id]/topups/page.tsx` 等）在 **server 端經 `cmsRequest`** 取得（解 envelope，無 CSV 透傳例外）；瀏覽器請求的是 **page 路由**，**非**透過 `/api/[...path]` proxy 直打 `/api/cms/deposit-records*` |
 | [`02-auth-session.md`](./02-auth-session.md) | session 必須有效；refresh / replay 由 session 層處理 |
-| [`03-observability.md`](./03-observability.md) | metric tag：`route=/api/cms/deposit-records`、`route=/api/cms/deposit-records/{id}`；redact 規則覆蓋 `amount` 嗎？預設不（金額非個資）|
+| [`03-observability.md`](./03-observability.md) | **trace**：`apiFetch` 注入 traceparent 至上游 `/api/cms/deposit-records*` 呼叫，於 X-Ray 形成子 span（[`03 §4.6`](./03-observability.md)）。**metric**：`http.request.*` 的 `route` 維度須為 **route template** 且在 **BFF inbound 層**發出（[`03 §3.3`](./03-observability.md)）；資料由 RSC server 端經 `cmsRequest` 取得，inbound `route` 是 **page 路由**（`/deposit-records`、`/players/[id]/topups`…），**非**上游 `/api/cms/deposit-records`（後者只現於 trace span）。**redact**：`amount` 不 redact（金額非個資） |
 | [`05-player-query-domain.md`](./05-player-query-domain.md) | 共享 `playerId` 識別；玩家僅以 `player_id` 在 record 內引用（後端補 `player_name`）|
 | [`07-admin-rbac-audit.md`](./07-admin-rbac-audit.md) | 角色：create=admin/user、list/get=全 CMS staff、update=admin；稽核事件 |
 | [`10-screen-topup-list.md`](./10-screen-topup-list.md) | 列表頁 UI；本規格資料層；URL 篩選參數與本規格 §3.2 對齊 |
