@@ -5,27 +5,28 @@ import { useRouter } from 'next/navigation';
 import { Search, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DEPOSIT_STATUS_OPTIONS, PAYMENT_METHOD_OPTIONS } from '@/lib/topups/labels';
-import type { DepositListQuery, DepositStatus, DepositSort, PaymentMethod } from '../_lib/types';
 import { serializeListQuery } from '@/lib/topups/query-params';
+import type {
+  DepositListQuery,
+  DepositStatus,
+  DepositSort,
+  PaymentMethod,
+} from '@/lib/topups/types';
 import { DateRangePicker } from '@/components/topups/date-range-picker';
 import { MultiSelect } from '@/components/topups/multi-select';
 import { SortSelect } from '@/components/topups/sort-select';
 
 const DEFAULT_SORT: DepositSort = '-created_at';
+const BASE = '/deposit-records';
 
 /**
- * 篩選列（spec 10 §4）。受控草稿狀態；變更不立即送出，
- * 點「套用」才 router.push 觸發 page.tsx 重新 SSR；「清除」回到預設。
+ * 篩選列（spec 14 §B4）。沿用 spec 10 行為（草稿狀態、按「套用」才送出）。
+ * 跨玩家頁特性：**保留 playerId 聚焦**——套用 / 清除都不沖掉 `?playerId=`
+ * （玩家聚焦的清除由 ActivePlayerChip 負責）。本列本身不含玩家欄（server-first）。
  */
-export function FilterBar({
-  playerId,
-  initialQuery,
-}: {
-  playerId: string;
-  initialQuery: DepositListQuery;
-}) {
+export function FilterBar({ initialQuery }: { initialQuery: DepositListQuery }) {
   const router = useRouter();
-  const base = `/players/${playerId}/topups`;
+  const playerId = initialQuery.playerId;
 
   const [startDate, setStartDate] = useState(initialQuery.startDate ?? '');
   const [endDate, setEndDate] = useState(initialQuery.endDate ?? '');
@@ -36,6 +37,7 @@ export function FilterBar({
 
   const buildQuery = (): DepositListQuery => {
     const q: DepositListQuery = {};
+    if (playerId) q.playerId = playerId; // 保留聚焦
     if (startDate) q.startDate = startDate;
     if (endDate) q.endDate = endDate;
     if (status.length) q.status = status as DepositStatus[];
@@ -47,7 +49,7 @@ export function FilterBar({
   const handleApply = (e: FormEvent) => {
     e.preventDefault();
     if (!dateValid) return;
-    router.push(`${base}${serializeListQuery(buildQuery())}`);
+    router.push(`${BASE}${serializeListQuery(buildQuery())}`);
   };
 
   const handleClear = () => {
@@ -57,7 +59,8 @@ export function FilterBar({
     setPaymentMethod([]);
     setSort(DEFAULT_SORT);
     setDateValid(true);
-    router.push(base);
+    // 清篩選但保留玩家聚焦
+    router.push(`${BASE}${playerId ? serializeListQuery({ playerId }) : ''}`);
   };
 
   return (

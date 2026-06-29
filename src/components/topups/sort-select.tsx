@@ -1,7 +1,7 @@
 'use client';
 
 import { cn } from '@/lib/utils';
-import type { DepositSort } from '../_lib/types';
+import type { DepositSort } from '@/lib/topups/types';
 
 export const SORT_OPTIONS: ReadonlyArray<{ value: DepositSort; label: string }> = [
   { value: '-created_at', label: '最新優先' },

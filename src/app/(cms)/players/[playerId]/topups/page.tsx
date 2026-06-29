@@ -1,11 +1,11 @@
 import { listDeposits } from '@/lib/topups/list';
 import { isApiError } from '@/lib/api/errors';
 import { recordMetric } from '@/lib/observability/ui-metrics';
-import { parseListQuery } from './_lib/query-params';
+import { parseListQuery } from '@/lib/topups/query-params';
 import { FilterBar } from './_components/filter-bar';
 import { CreateDepositButton } from './_components/create-deposit-button';
 import { ResultTable } from './_components/result-table';
-import { Pagination } from './_components/pagination';
+import { Pagination } from '@/components/topups/pagination';
 import { EmptyState } from './_components/empty-state';
 import { ErrorState, type ErrorVariant } from './_components/error-state';
 import type { DepositListQuery } from './_lib/types';
@@ -78,7 +78,7 @@ export async function TopupsResult({
       <div className="space-y-2">
         <ResultTable records={records} playerId={playerId} />
         <Pagination
-          playerId={playerId}
+          basePath={`/players/${playerId}/topups`}
           query={query}
           page={page}
           pageSize={pageSize}

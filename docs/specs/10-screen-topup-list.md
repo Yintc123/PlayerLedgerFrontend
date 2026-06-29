@@ -67,7 +67,7 @@ src/app/(cms)/players/[playerId]/topups/
     ├── result-table.test.tsx
     ├── result-row.tsx             # 單列（Client）
     ├── result-row.test.tsx
-    ├── pagination.tsx             # 「載入更多」按鈕（Client，OFFSET page+1）
+    # pagination 已提升至 @/components/topups/pagination.tsx（頁碼導航，與 spec 14 共用）
     ├── pagination.test.tsx
     ├── create-button.tsx          # 「建立儲值」入口（Client，依角色顯隱）
     ├── create-button.test.tsx
@@ -185,15 +185,16 @@ src/app/(cms)/players/[playerId]/topups/
 ## 6. 分頁（`Pagination`，OFFSET）
 
 後端採 **OFFSET 分頁**（`page` / `page_size` + `meta.total`，見 [`06 §5`](./06-topup-records-domain.md)）。
+分頁採**頁碼導航**（`1 2 3 … N`），由共用元件 `@/components/topups/pagination.tsx` 提供（提升自本 spec，與 [`14`](./14-screen-global-deposit-records.md) 共用；介面見 [`14 §B1.3`](./14-screen-global-deposit-records.md)）。
 
-- 列表底「載入更多」按鈕；點擊 `router.push` 帶 `page=<currentPage + 1>`（其餘篩選不變）
-- **是否還有下一頁**：`page * pageSize < total` 為真時渲染按鈕，否則不渲染
-- `page.tsx` 從 `listDeposits` 回傳的 `meta { page, pageSize, total }` 推導下一頁是否存在，傳給 `Pagination`
-- **不做** infinite scroll（同 [`08 §5.3`](./08-screen-player-search.md) 理由）
-- 載入新頁時 append 在原表格下方？**否**——v1 採「跳到新頁」語意：URL 帶 `page`、新頁覆蓋舊頁。原因：簡化 server-first model；累積 append 需 client state，與「URL 為唯一狀態」原則衝突。
-- 因 OFFSET 有 `total`，未來可改顯示頁碼（`1 2 3 … N`）；v1 維持「載入更多」單一按鈕。
-
-> **未來考慮**：若客服反映「翻第 5 頁後忘記前面看到什麼」，再評估改 append 或頁碼模式；非 v1 範圍。
+- **總頁數** = `Math.ceil(total / pageSize)`；`<= 1` 時不渲染分頁（單頁無需導航）。
+- 渲染：`上一頁` ‧ 頁碼按鈕（含省略號 `…`）‧ `下一頁`。
+  - 頁碼視窗：恆顯示第 1 頁與最末頁 + 目前頁 ±1，其餘以 `…` 省略。
+  - 目前頁標 `aria-current="page"`；`上一頁` 於第 1 頁、`下一頁` 於最末頁 `disabled`。
+- 點任一頁碼 / 上一頁 / 下一頁 → `router.push(`${basePath}${serializeListQuery({ ...query, page: N })}`)`，**其餘篩選不變**；`page === 1` 時省略 `page` 參數（URL 不寫預設值）。
+- **跳到新頁**語意：URL 帶 `page`、新頁覆蓋舊頁（**不** append、**不** infinite scroll，同 [`08 §5.3`](./08-screen-player-search.md) 理由）——維持「URL 為唯一狀態」。
+- `page.tsx` 把 `meta { page, pageSize, total }` 傳給 `Pagination`（serializable `basePath` + `query`，見 [`14 §B1.3`](./14-screen-global-deposit-records.md)）。
+- 載入中（route transition）以 `aria-busy` 標示。
 
 ---
 
@@ -281,7 +282,7 @@ export function serializeListQuery(query: TopupListQuery): string
 | DateRangePicker | 原生 `<input type="date">` 已支援鍵盤；不另外實作 |
 | 表格 | `<table>` 語意；表頭 `<th scope="col">`；列 `<tr role="row">` |
 | 排序狀態 | `<th aria-sort="descending">` |
-| 「載入更多」 | `<button>` + `aria-busy="true"` 載入中 |
+| 分頁導航 | `<nav aria-label="分頁">`；頁碼 `<button>`，目前頁 `aria-current="page"`；route transition 時 `aria-busy` |
 | 「建立儲值」 | `<a>` / `<button>`；可鍵盤聚焦 |
 | 狀態 tag | 文字 + 顏色（不單靠顏色） |
 | 載入態 | `aria-live="polite"` |
@@ -361,13 +362,17 @@ it('should navigate to /players/[id]/topups/[recordId] when row clicked')
 it('should be focusable and navigate on Enter')
 ```
 
-### 12.6 `_components/pagination.test.tsx`
+### 12.6 `@/components/topups/pagination.test.tsx`（共用元件，頁碼導航）
 
 ```ts
-it('should NOT render button when page * pageSize >= total (no next page)')
-it('should render button when page * pageSize < total')
-it('should call router.push with page+1 (other filters preserved) when clicked')
-it('should expose aria-busy on click until route transition completes')
+it('should NOT render when total <= pageSize (single page)')
+it('should render numbered page buttons when multiple pages exist')
+it('should mark the current page with aria-current="page"')
+it('should disable 上一頁 on the first page and 下一頁 on the last page')
+it('should push basePath with page=N (filters preserved) when a page is clicked')
+it('should omit the page param when navigating to page 1 (clean default URL)')
+it('should render ellipsis (…) when pages exceed the visible window')
+it('should expose aria-busy during the route transition')
 ```
 
 ### 12.7 `_components/create-button.test.tsx`
@@ -402,7 +407,7 @@ it('should emit topups.list.result_count metric on render')
 test('filter by date range + status (repeated keys) returns matching records and URL reflects state')
 test('clicking Clear resets URL to /players/[id]/topups and shows default results')
 test('clicking a row navigates to /players/[id]/topups/[recordId]')
-test('load-more advances page and appends/replaces results until total reached')
+test('clicking page 2 advances results and reflects page=2 in the URL')
 test('admin role sees Create button and reaches /players/[id]/topups/new')
 test('viewer role does not see Create button')
 test('reload preserves filter state via URL')
@@ -414,6 +419,6 @@ test('reload preserves filter state via URL')
 
 - [ ] 後端**無匯出端點**：CSV 匯出功能已移除，待後端提供後再設計（見 [`06 §8`](./06-topup-records-domain.md)）
 - [ ] 後端**無玩家詳情端點**：無法在進入列表前驗證 `player_id` 是否存在（不存在僅回空陣列）；待後端補 members 詳情端點
-- [ ] OFFSET 分頁是否改頁碼 UI（`1 2 3 … N`，因有 `meta.total`）？v1 維持「載入更多」
+- [x] OFFSET 分頁改頁碼 UI（`1 2 3 … N`，因有 `meta.total`）：已實作（共用 `@/components/topups/pagination.tsx`，§6）。
 - [ ] 列表新增「最近活動」等冗餘欄位？v1 純儲值欄位
 - [ ] 多幣別：後端目前僅 TWD；開放多幣別後再評估金額排序 / 顯示細節（[`06 §12`](./06-topup-records-domain.md)）

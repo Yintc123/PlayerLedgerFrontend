@@ -25,6 +25,12 @@ export function CmsShell({ children }: { children: React.ReactNode }) {
               >
                 玩家搜尋
               </Link>
+              <Link
+                href="/deposit-records"
+                className="text-muted-foreground hover:text-foreground rounded-md px-3 py-1.5 hover:bg-slate-100"
+              >
+                儲值紀錄
+              </Link>
             </nav>
           </div>
           <LogoutButton />

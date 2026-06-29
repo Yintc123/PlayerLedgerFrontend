@@ -1,6 +1,10 @@
 /**
- * URL ↔ DepositListQuery 解析與序列化（spec 10 §9）。
+ * URL ↔ DepositListQuery 解析與序列化（spec 10 §9 / spec 14 §B7.2）。
  * URL 是篩選狀態的唯一來源；空欄位不寫入；解析失敗 fall back 預設（不 throw）。
+ *
+ * 共用於兩個畫面（提升自 spec 10 `_lib/query-params.ts`）：
+ * - 單玩家列表 `/players/[playerId]/topups`（`playerId` 由路由帶入，URL 不含）
+ * - 全玩家列表 `/deposit-records`（`playerId` 為可選 URL 篩選；省略 = 全玩家）
  *
  * 對齊後端 GET /api/cms/deposit-records：offset 分頁（page/page_size）、
  * 多值篩選採「重複 key」（?status=pending&status=failed），非逗號分隔。
@@ -37,6 +41,10 @@ function parseRepeated(values: string[]): string[] | undefined {
 export function parseListQuery(params: ParamsLike): DepositListQuery {
   const query: DepositListQuery = {};
 
+  // playerId：全玩家頁的可選聚焦（spec 14）；單玩家頁不帶（由路由提供）
+  const playerId = nonEmpty(params.get('playerId'));
+  if (playerId) query.playerId = playerId;
+
   const page = parseIntField(params.get('page'));
   if (page !== undefined) query.page = page;
 
@@ -64,6 +72,7 @@ export function parseListQuery(params: ParamsLike): DepositListQuery {
 export function serializeListQuery(query: DepositListQuery): string {
   const sp = new URLSearchParams();
 
+  if (query.playerId) sp.set('playerId', query.playerId);
   if (query.page != null) sp.set('page', String(query.page));
   if (query.pageSize != null) sp.set('pageSize', String(query.pageSize));
   if (query.startDate) sp.set('startDate', query.startDate);

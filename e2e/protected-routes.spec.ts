@@ -23,6 +23,14 @@ test.describe('Protected Routes', () => {
     expect(url).toMatch(/dashboard|login/);
   });
 
+  test('should require authentication for /deposit-records (spec 14)', async ({ page }) => {
+    await page.goto('/deposit-records');
+
+    const url = page.url();
+    expect(url).toContain('/login');
+    expect(url).toContain('redirect=%2Fdeposit-records');
+  });
+
   test('should prevent access to protected API endpoints without session', async ({ request }) => {
     // proxy.ts 對非公開 path 沒有 session → 302 redirect 到 /login。
     // Playwright request 預設會跟 redirect，需明確 maxRedirects: 0 才看得到 302。

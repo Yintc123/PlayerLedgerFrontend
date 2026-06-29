@@ -69,6 +69,19 @@ describe('parseListQuery', () => {
     );
     expect(q).toEqual({});
   });
+
+  // spec 14 §B7.2 — playerId（全玩家頁可選聚焦）
+  it('should parse playerId via params.get', () => {
+    expect(parseListQuery(new URLSearchParams({ playerId: '01HABCD' })).playerId).toBe('01HABCD');
+  });
+
+  it('should leave playerId undefined when absent (all-players)', () => {
+    expect(parseListQuery(new URLSearchParams()).playerId).toBeUndefined();
+  });
+
+  it('should leave playerId undefined when blank', () => {
+    expect(parseListQuery(new URLSearchParams({ playerId: '   ' })).playerId).toBeUndefined();
+  });
 });
 
 describe('serializeListQuery', () => {
@@ -115,5 +128,19 @@ describe('serializeListQuery', () => {
     };
     const parsed = parseListQuery(new URLSearchParams(serializeListQuery(q)));
     expect(parsed).toEqual(q);
+  });
+
+  // spec 14 §B7.2 — playerId
+  it('should emit playerId when present', () => {
+    expect(serializeListQuery({ playerId: '01HABCD' })).toBe('?playerId=01HABCD');
+  });
+
+  it('should omit playerId when undefined (spec 10 output unchanged)', () => {
+    expect(serializeListQuery({ status: ['pending'] })).toBe('?status=pending');
+  });
+
+  it('should round-trip playerId through parseListQuery', () => {
+    const q: DepositListQuery = { playerId: '01HABCD', status: ['pending'] };
+    expect(parseListQuery(new URLSearchParams(serializeListQuery(q)))).toEqual(q);
   });
 });
