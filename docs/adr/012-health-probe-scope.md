@@ -2,7 +2,9 @@
 
 ## 狀態
 
-已採用（修訂 [01-bff-architecture.md §9](../specs/01-bff-architecture.md#9-健康檢查端點) 將 `/api/health` 拆為 shallow + deep 兩個端點）
+部分被取代。shallow / deep 的拆分仍有效，但 **shallow probe 含 Redis 並交給 ECS Target Group 的決策已由 [ADR 022](./022-health-liveness-readiness-split.md) 取代**：`/api/health` 改為純 liveness（不含 Redis），Redis 檢查移至新的 `/api/health/ready`。原因見 ADR 022——Redis 抖動會讓整批 BFF task 同時被 ECS 替換、卻無法修好 Redis。本文「方案 C：純 process-alive」當時被否決的理由已被實際營運推翻，下方保留原文供歷史脈絡。
+
+> 原始狀態：已採用（修訂 [01-bff-architecture.md §9](../specs/01-bff-architecture.md#9-健康檢查端點) 將 `/api/health` 拆為 shallow + deep 兩個端點）
 
 ## 背景
 

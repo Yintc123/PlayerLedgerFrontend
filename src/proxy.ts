@@ -14,8 +14,9 @@ const PUBLIC_PATHS = new Set<string>([
   '/api/login',
   '/api/logout',
   '/api/register', // §3.6 passthrough，無對應 UI，仍受 CSRF + rate limit 保護
-  '/api/health', // shallow health（ECS / docker）— ADR 012
-  '/api/health/deep', // deep health（CD smoke test）— ADR 012
+  '/api/health', // liveness（ECS Target Group / docker HEALTHCHECK）— ADR 022
+  '/api/health/ready', // readiness：Redis 依賴檢查（dashboard / 監控，非 ECS）— ADR 022
+  '/api/health/deep', // deep health（CD smoke test）— ADR 012 / 022
   '/api/client-errors', // frontend error boundary 回報 — 03-observability §6.1
   '/api/csp-report', // CSP 違規回報 — spec 01 §10.3
   '/api/vitals', // Web Vitals beacon — 03-observability §6.1

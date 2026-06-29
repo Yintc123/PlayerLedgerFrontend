@@ -9,7 +9,7 @@
 | **可重現 build** | `npm ci` 而非 `npm install`、base image 以 `@sha256:` digest 釘版（純 tag 會隨 mutable rebuild 漂移） |
 | **快速啟動** | 預先 copy 必要檔案、避免啟動時的解壓 / 編譯 |
 | **CI / CD 友善** | 善用 BuildKit cache、layer 順序由「最不常變」到「最常變」、build 時產出 SBOM 與 provenance attestation |
-| **健康可檢測** | HEALTHCHECK 指令對應 spec 01 §9 的 `/api/health`，path / port 來自 ENV 不寫死 |
+| **健康可檢測** | HEALTHCHECK 指令對應 spec 01 §9.1 的 liveness `/api/health`（只證明 process 活著，不含 Redis；ADR 022），path / port 來自 ENV 不寫死 |
 | **優雅關閉** | `tini` 當 PID 1 收割殭屍、轉送 SIGTERM；Next.js standalone server 內收到 SIGTERM 後須等 in-flight 請求結束才退出，避免 ECS rolling deploy 砍斷使用者請求（詳見 §3.6） |
 
 ---
@@ -119,14 +119,14 @@ USER nextjs
 
 EXPOSE 3000
 
-# HEALTHCHECK 對應 spec 01 §9 的 /api/health
+# HEALTHCHECK 對應 spec 01 §9.1 的 liveness /api/health（不含 Redis；ADR 022）
 # CMD 為 shell 形式（無 JSON 陣列），${PORT} 會在 runtime 由 /bin/sh 展開，
 # 因此 ECS Task 改 PORT env 不會讓健康檢查靜默壞掉
 # 注意：ECS Target Group 同時做 L7 health check（spec 01 §9.4），這層是 docker 層保險
 #
 # 為何不用 `wget --spider`：busybox wget --spider 在 HTTP 4xx 仍 exit 0
 # （只在 transport 錯誤 / 5xx 失敗），路由失誤導致 /api/health 變 404 時假綠燈。
-# 改為下載 body 並 grep `"status":"ok"`，配合 BFF 端 §9.1 的 shape 一致。
+# 改為下載 body 並 grep `"status":"ok"`，配合 BFF 端 §9.1 liveness 的 shape 一致。
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD wget -q -O- "http://127.0.0.1:${PORT}/api/health" 2>/dev/null \
         | grep -q '"status":"ok"' || exit 1
@@ -470,8 +470,9 @@ docker history --no-trunc --format '{{.CreatedBy}}' playerledger-frontend:test \
 **Runtime 檢查（SIGTERM drain 行為驗證）：**
 
 ```bash
-# /api/health（shallow）對齊 spec 01 §9.1 需檢查 Redis PING，因此 smoke 必須帶 redis sidecar，
-# 否則 HEALTHCHECK 永遠拿到 503，graceful shutdown 測試壓根跑不到
+# /api/health 自 ADR 022 起為 liveness，不檢查 Redis，故 HEALTHCHECK 不需 live Redis 即可轉綠。
+# 但 config.ts 在 module load fail-fast 驗證 REDIS_HOST 必填（缺值 server 起不來），故仍須提供
+# REDIS_HOST env；下方 redis sidecar 改為可選——保留是為了一併煙霧測試 readiness /api/health/ready。
 docker network create pl-smoke-net
 docker run -d --name pl-smoke-redis --network pl-smoke-net \
   redis:7-alpine --save "" --appendonly no

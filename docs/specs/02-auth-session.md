@@ -904,8 +904,9 @@ const PUBLIC_PATHS = new Set<string>([
   '/api/login',
   '/api/logout',
   '/api/register',      // §3.6 — passthrough；domain 見 spec 12、UI 見 spec 13；CSRF + rate limit 仍適用
-  '/api/health',        // shallow health（ECS / docker）— 詳見 ADR 012
-  '/api/health/deep',   // deep health（CD smoke test / dashboard）— 詳見 ADR 012
+  '/api/health',        // liveness（ECS Target Group / docker）— 詳見 ADR 022
+  '/api/health/ready',  // readiness：Redis 依賴檢查（dashboard / 監控，非 ECS）— 詳見 ADR 022
+  '/api/health/deep',   // deep health（CD smoke test / dashboard）— 詳見 ADR 012 / 022
   '/api/client-errors', // frontend error boundary 回報 — 詳見 03-observability.md §6.1
   '/api/csp-report',    // CSP 違規回報 — 詳見 spec 01 §10.3
   '/api/vitals',        // Web Vitals beacon — 詳見 03-observability.md §6.1
@@ -1050,8 +1051,9 @@ export const config = {
 | `/login` | 登入頁面本身不需要 session |
 | `/api/login` | 登入端點不需要 session（這裡才建立 session）|
 | `/api/logout` | 登出必須在 session 失效時仍能執行；Route Handler 內部自行處理無 session 的情況（直接回 200）|
-| `/api/health` | ECS Target Group / Docker HEALTHCHECK 使用，**shallow**（只檢查 Redis），詳見 [ADR 012](../adr/012-health-probe-scope.md) |
-| `/api/health/deep` | CD smoke test / 外部 monitor 使用，額外檢查上游 API Server；**禁止放進 Target Group** |
+| `/api/health` | ECS Target Group / Docker HEALTHCHECK 使用，**liveness**（不檢查任何依賴，恆 200），詳見 [ADR 022](../adr/022-health-liveness-readiness-split.md) |
+| `/api/health/ready` | **readiness**：檢查 Redis；dashboard / 內部監控使用，**禁止放進 Target Group** |
+| `/api/health/deep` | CD smoke test / 外部 monitor 使用，readiness + 上游 API Server；**禁止放進 Target Group** |
 
 **proxy.ts 完整執行順序：**
 
@@ -2350,6 +2352,7 @@ it('should handle missing base64 padding')
 - [ADR 010 - 對齊後端 ADR 007：client_id、refresh 失敗不重試、多分頁協調](../adr/010-align-with-backend-adr007-jwt.md)
 - [ADR 011 - 邊緣安全強化（XFF 信賴 + login fail-closed）](../adr/011-edge-security-hardening.md)
 - [ADR 012 - 健康檢查端點 shallow / deep 分離](../adr/012-health-probe-scope.md)
+- [ADR 022 - 健康檢查改三層：liveness / readiness / deep](../adr/022-health-liveness-readiness-split.md)
 - [ADR 013 - CSRF 防護策略（SameSite=Lax + Origin Check）](../adr/013-csrf-defense-strategy.md)
 - [ADR 021 - 採用 Tailwind v4 + shadcn/ui 作為前端 styling 堆疊](../adr/021-tailwind-v4-shadcn-ui.md)
 - [後端 ADR 007 - Refresh Token Rotation 與重放偵測](../../PlayerLedgerBackend/docs/adr/007-refresh-token-rotation-and-replay-detection.md) ⚠️ 取代後端 ADR 002

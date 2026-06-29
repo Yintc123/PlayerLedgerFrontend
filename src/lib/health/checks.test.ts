@@ -34,7 +34,7 @@ vi.mock('@/lib/logger/logger', () => ({
   },
 }));
 
-import { checkRedis, checkApiServer, getShallowHealth, getDeepHealth } from './checks';
+import { checkRedis, checkApiServer, getLiveness, getReadiness, getDeepHealth } from './checks';
 import { healthRedis } from '@/lib/session/redis';
 
 describe('Health Checks', () => {
@@ -122,36 +122,65 @@ describe('Health Checks', () => {
     });
   });
 
-  describe('getShallowHealth', () => {
-    it('should return status ok when redis is healthy', async () => {
-      vi.mocked(healthRedis.ping).mockResolvedValueOnce('PONG');
-      const health = await getShallowHealth();
+  describe('getLiveness', () => {
+    it('should return status ok without checking any dependency', () => {
+      const health = getLiveness();
 
       expect(health.status).toBe('ok');
-      expect(health.checks.redis.status).toBe('ok');
+      expect(health.timestamp).toBeDefined();
+    });
+
+    it('should NOT query Redis (liveness is dependency-free, ADR 022)', () => {
+      getLiveness();
+
+      expect(healthRedis.ping).not.toHaveBeenCalled();
+    });
+
+    it('should NOT call upstream API server', () => {
+      vi.mocked(global.fetch).mockClear();
+
+      getLiveness();
+
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('should omit the checks field (no dependency checks performed)', () => {
+      const health = getLiveness();
+
+      expect(health.checks).toBeUndefined();
+    });
+  });
+
+  describe('getReadiness', () => {
+    it('should return status ok when redis is healthy', async () => {
+      vi.mocked(healthRedis.ping).mockResolvedValueOnce('PONG');
+      const health = await getReadiness();
+
+      expect(health.status).toBe('ok');
+      expect(health.checks?.redis.status).toBe('ok');
       expect(health.timestamp).toBeDefined();
     });
 
     it('should return status unhealthy when redis fails', async () => {
       vi.mocked(healthRedis.ping).mockRejectedValueOnce(new Error('ECONNREFUSED'));
-      const health = await getShallowHealth();
+      const health = await getReadiness();
 
       expect(health.status).toBe('unhealthy');
-      expect(health.checks.redis.status).toBe('error');
+      expect(health.checks?.redis.status).toBe('error');
     });
 
     it('should NOT call upstream API server', async () => {
       vi.mocked(healthRedis.ping).mockResolvedValueOnce('PONG');
       vi.mocked(global.fetch).mockClear();
 
-      await getShallowHealth();
+      await getReadiness();
 
       expect(global.fetch).not.toHaveBeenCalled();
     });
 
     it('should include correct structure', async () => {
       vi.mocked(healthRedis.ping).mockResolvedValueOnce('PONG');
-      const health = await getShallowHealth();
+      const health = await getReadiness();
 
       expect(health).toHaveProperty('status');
       expect(health).toHaveProperty('timestamp');
@@ -171,8 +200,8 @@ describe('Health Checks', () => {
       const health = await getDeepHealth();
 
       expect(health.status).toBe('ok');
-      expect(health.checks.redis.status).toBe('ok');
-      expect(health.checks.apiServer.status).toBe('ok');
+      expect(health.checks?.redis.status).toBe('ok');
+      expect(health.checks?.apiServer.status).toBe('ok');
     });
 
     it('should return status unhealthy when redis fails', async () => {
@@ -185,8 +214,8 @@ describe('Health Checks', () => {
       const health = await getDeepHealth();
 
       expect(health.status).toBe('unhealthy');
-      expect(health.checks.redis.status).toBe('error');
-      expect(health.checks.apiServer.status).toBe('ok');
+      expect(health.checks?.redis.status).toBe('error');
+      expect(health.checks?.apiServer.status).toBe('ok');
     });
 
     it('should return status unhealthy when apiServer fails', async () => {
@@ -199,8 +228,8 @@ describe('Health Checks', () => {
       const health = await getDeepHealth();
 
       expect(health.status).toBe('unhealthy');
-      expect(health.checks.redis.status).toBe('ok');
-      expect(health.checks.apiServer.status).toBe('error');
+      expect(health.checks?.redis.status).toBe('ok');
+      expect(health.checks?.apiServer.status).toBe('error');
     });
 
     it('should return mixed status as unhealthy', async () => {
@@ -210,8 +239,8 @@ describe('Health Checks', () => {
       const health = await getDeepHealth();
 
       expect(health.status).toBe('unhealthy');
-      expect(health.checks.redis.status).toBe('ok');
-      expect(health.checks.apiServer.status).toBe('error');
+      expect(health.checks?.redis.status).toBe('ok');
+      expect(health.checks?.apiServer.status).toBe('error');
     });
 
     it('should run checks in parallel', async () => {

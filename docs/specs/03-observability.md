@@ -383,7 +383,7 @@ export function metric(
 | `ratelimit.fail_closed` | Count | `route` | **高優先**：Redis 故障時 login 被拒絕，service degraded（ADR 011） |
 | `ratelimit.fail_open` | Count | `route` | Redis 故障時非 login 端點放行,需追蹤累積影響 |
 | `auth.proxy.csrf_blocked` | Count | `method`, `path` | CSRF Origin check 擋下的請求，異常飆高可能代表攻擊（ADR 013） |
-| `health.shallow.failure` | Count | — | `/api/health` 失敗（Redis 真的掛了，ECS 將替換 task）|
+| `health.readiness.failure` | Count | — | `/api/health/ready` 失敗（Redis 不可達，session 功能降級）。**不再觸發 ECS 替換 task**——liveness 與 Redis 解耦（ADR 022），改由此 metric + alarm 通報人工介入 |
 | `health.deep.failure` | Count | — | `/api/health/deep` 失敗（多半是上游 API 異常，**不替換 task**，搭配 `api_server.call.error` 追蹤）|
 | `redis.operation.duration` | Milliseconds | `operation`(get/set/del/incr) | Redis 延遲監控 |
 | `redis.operation.error` | Count | `operation` | Redis 錯誤率 |
@@ -415,7 +415,7 @@ auth.token.refresh.count where outcome = "absolute_expired" / total ratio > 5% i
 auth.proxy.csrf_blocked > 50 in 5 minutes → 黃色警報（CSRF 嘗試異常飆高，可能正在被掃描）
 ratelimit.fail_closed > 0 in 1 minute → 紅色警報（login 端點完全不可用，ADR 011）
 ratelimit.fail_open > 10 in 5 minutes → 黃色警報（Redis 異常但仍放行，service degraded）
-health.shallow.failure > 0 in 1 minute → 紅色警報（Redis 不可達，task 將被替換，需確認是否大量同時發生）
+health.readiness.failure > 0 in 1 minute → 紅色警報（Redis 不可達，session 功能降級；ECS 不會自動替換 task，需人工介入修 Redis / ElastiCache，ADR 022）
 redis.operation.error rate > 1% in 5 minutes → 紅色警報
 api_server.call.error where status_class = "5xx" > 5% in 5 minutes → 紅色警報
 ECS service "playerledger-frontend" adot-collector container exit count > 0 in 5 minutes → 黃色警報（sidecar essential=false，BFF 仍在跑但 trace 中斷；需查 OOM 或 panic）
