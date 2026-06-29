@@ -216,6 +216,15 @@ describe('createIdleTimer', () => {
     expect(h.events).toContainEqual({ type: 'extended', via: 'activity' });
   });
 
+  it('should emit extended event via "click" when notifyActivity given click source', () => {
+    const h = harness();
+    h.timer.notifyActivity();
+    h.advance(IDLE - WARN);
+    h.fire(); // warning
+    h.timer.notifyActivity(undefined, 'click'); // 「繼續工作」按鈕
+    expect(h.events).toContainEqual({ type: 'extended', via: 'click' });
+  });
+
   // ── lifecycle ───────────────────────────────────────────────────
   it('should be safe to call dispose multiple times and stop further events', () => {
     const h = harness();

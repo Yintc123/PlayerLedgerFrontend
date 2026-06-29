@@ -57,6 +57,7 @@ export function createAuthChannel(opts: AuthChannelOpts): AuthChannelHandle {
   const ownNonces = new Map<string, number>(); // nonce -> expireAt
   let loggingOut = false;
   let disposed = false;
+  let lastOwnWarningAt = Number.NEGATIVE_INFINITY; // §5.6：本分頁最後一次顯示警告的 at
 
   const bc = new BroadcastChannel(CHANNEL_NAME);
 
@@ -92,7 +93,8 @@ export function createAuthChannel(opts: AuthChannelOpts): AuthChannelHandle {
         // 同帳號（重新整理 / 多分頁同帳號登入）
         return !(opts.currentSession && msg.userId === opts.currentSession.userId);
       case 'warning':
-        return true;
+        // 本分頁自己更新（warningShownAt > 訊息 at）→ 丟棄較舊的 echo（§5.6）
+        return !(msg.at < lastOwnWarningAt);
     }
   };
 
@@ -107,6 +109,7 @@ export function createAuthChannel(opts: AuthChannelOpts): AuthChannelHandle {
       post({ type: 'activity', at, nonce: genNonce() });
     },
     postWarning(at = now()) {
+      lastOwnWarningAt = at;
       post({ type: 'warning', at, nonce: genNonce() });
     },
     postLogout(at = now()) {

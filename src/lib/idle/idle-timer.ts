@@ -31,8 +31,11 @@ export type IdleTimerOpts = {
 };
 
 export type IdleTimerHandle = {
-  /** 由 DOM activity 或 cross-tab 廣播觸發；自動 throttle 1s */
-  notifyActivity(at?: number): void;
+  /**
+   * 由 DOM activity / cross-tab 廣播 / 「繼續工作」按鈕觸發；自動 throttle 1s。
+   * `via` 標記延長來源（DOM/廣播 → 'activity'，按鈕 → 'click'），供 idle_extended 觀測。
+   */
+  notifyActivity(at?: number, via?: 'activity' | 'click'): void;
   /** 由「立即登出」按鈕觸發；強制 onEvent({type:'expire',...}) 一次 */
   forceExpire(reason: 'manual'): void;
   /** 解綁所有 timer，多次呼叫安全 */
@@ -107,7 +110,7 @@ export function createIdleTimer(opts: IdleTimerOpts): IdleTimerHandle {
   };
 
   return {
-    notifyActivity(at = deps.now()) {
+    notifyActivity(at = deps.now(), via: 'activity' | 'click' = 'activity') {
       if (loggingOut || disposed) return;
       const wasWarning = warningShownAt !== null;
       // 永遠更新活動時間（wall-clock 精度），即使在 throttle 窗內
@@ -115,7 +118,7 @@ export function createIdleTimer(opts: IdleTimerOpts): IdleTimerHandle {
       expiryAt = at + idleTimeoutMs;
       if (wasWarning) {
         warningShownAt = null; // 開新 cycle
-        onEvent({ type: 'extended', via: 'activity' });
+        onEvent({ type: 'extended', via });
       }
       // throttle：窗內不重排、不 emit（warning 解除為有意義狀態變化，繞過 throttle）
       if (!wasWarning && at - lastRescheduleAt < THROTTLE_MS) return;

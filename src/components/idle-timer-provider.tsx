@@ -85,7 +85,8 @@ export function IdleTimerProvider({ children, policyOverride }: IdleTimerProvide
     const onExpire = (idleMs: number) => {
       if (loggingOut) return; // 防重入
       loggingOut = true;
-      recordMetric('auth.session.idle_logout', { idleMs });
+      // 觀測欄位對齊 spec 03 §2.5（userId + idleMs）
+      recordMetric('auth.session.idle_logout', { userId, idleMs });
       channel.postLogout(Date.now());
       sendLogout();
       navigateToLogin();
@@ -93,10 +94,15 @@ export function IdleTimerProvider({ children, policyOverride }: IdleTimerProvide
 
     const handleTimerEvent = (e: IdleTimerEvent) => {
       if (e.type === 'warning') {
-        recordMetric('auth.session.idle_warning', { remainingMs: e.remainingMs });
+        recordMetric('auth.session.idle_warning', {
+          userId,
+          idleMs: idleTimeoutMs - warningMs,
+          remainingMs: e.remainingMs,
+        });
         setCountdownSec(Math.ceil(e.remainingMs / 1000));
+        channel.postWarning(Date.now()); // 跨分頁同步顯示警告（§5.6）
       } else if (e.type === 'extended') {
-        recordMetric('auth.session.idle_extended', {});
+        recordMetric('auth.session.idle_extended', { userId, wayDismissed: e.via });
         setCountdownSec(undefined);
       } else {
         setCountdownSec(undefined);
@@ -112,6 +118,12 @@ export function IdleTimerProvider({ children, policyOverride }: IdleTimerProvide
       } else if (msg.type === 'logout') {
         loggingOut = true;
         navigateToLogin();
+      } else if (msg.type === 'warning') {
+        // 他頁進入警告：本頁若也已逼近自身到期才同步顯示（避免提早彈窗副作用）
+        const remaining = timer.remainingMs();
+        if (remaining > 0 && remaining <= warningMs) {
+          setCountdownSec(Math.ceil(remaining / 1000));
+        }
       }
     };
 
@@ -162,7 +174,7 @@ export function IdleTimerProvider({ children, policyOverride }: IdleTimerProvide
 
   const onContinue = () => {
     setCountdownSec(undefined);
-    timerRef.current?.notifyActivity();
+    timerRef.current?.notifyActivity(Date.now(), 'click');
   };
   const onLogoutNow = () => {
     timerRef.current?.forceExpire('manual');
