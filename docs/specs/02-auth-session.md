@@ -1326,8 +1326,10 @@ export type AuthChannelOpts = {
   /** 用於 stale 過濾；缺漏代表「不過濾 createdAt」（如未登入頁面） */
   currentSession?: { createdAt: number; userId: string }
   onMessage:        (msg: AuthChannelMessage) => void
-  /** 預設 60_000；own-nonce Set 在這個 ms 後 evict */
+  /** 預設 60_000；own-nonce 在這個 ms 後 evict（lazy expiry + post 時 sweep） */
   nonceTtlMs?:      number
+  /** 測試注入：預設 Date.now / crypto.randomUUID。讓 echo 抑制與 TTL 可決定性測試 */
+  deps?: { now?: () => number; nonce?: () => string }
 }
 
 export type AuthChannelHandle = {
