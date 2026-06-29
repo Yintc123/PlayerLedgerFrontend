@@ -1,55 +1,65 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+
+// cookie.ts 在 module load 時依 config.app.secureTransport 計算 SESSION_COOKIE_NAME，
+// 故每個分支需以 mock config + 重新 import 驗證。
+async function loadCookie(secureTransport: boolean, cookieDomain?: string) {
+  vi.resetModules();
+  vi.doMock('@/lib/config', () => ({
+    config: {
+      app: { secureTransport },
+      session: { cookieDomain },
+    },
+  }));
+  return import('./cookie');
+}
+
+afterEach(() => {
+  vi.resetModules();
+  vi.doUnmock('@/lib/config');
+});
 
 describe('Cookie Configuration (§2.4)', () => {
   describe('SESSION_COOKIE_NAME', () => {
-    it('should emit Set-Cookie with __Host-sid name in production', () => {
-      (process.env as Record<string, string>).NODE_ENV = 'production';
-      // 实际测试应验证 Set-Cookie 头中的 cookie 名称
-      // __Host- 前缀要求安全属性 + 同源
-      expect(true).toBe(true);
+    it('should use __Host-sid when secureTransport is true (HTTPS)', async () => {
+      const { SESSION_COOKIE_NAME } = await loadCookie(true);
+      expect(SESSION_COOKIE_NAME).toBe('__Host-sid');
     });
 
-    it('should emit Set-Cookie with sid name in development', () => {
-      (process.env as Record<string, string>).NODE_ENV = 'development';
-      // 开发环境可以使用简单名称
-      expect(true).toBe(true);
+    it('should fall back to sid when secureTransport is false (ALB HTTP 直連)', async () => {
+      // __Host- 前綴要求 Secure，HTTP 下瀏覽器會拒收，故必須降級為 sid
+      const { SESSION_COOKIE_NAME } = await loadCookie(false);
+      expect(SESSION_COOKIE_NAME).toBe('sid');
     });
   });
 
-  describe('Cookie Attributes', () => {
-    it('should emit Set-Cookie with HttpOnly flag', () => {
-      // HttpOnly 防止 JavaScript 访问 cookie
-      expect(true).toBe(true);
+  describe('getCookieOptions', () => {
+    it('should set Secure flag when secureTransport is true', async () => {
+      const { getCookieOptions } = await loadCookie(true);
+      expect(getCookieOptions(60).secure).toBe(true);
     });
 
-    it('should emit Set-Cookie with Secure flag in production', () => {
-      // 仅在 HTTPS 上发送
-      expect(true).toBe(true);
+    it('should NOT set Secure flag when secureTransport is false', async () => {
+      const { getCookieOptions } = await loadCookie(false);
+      expect(getCookieOptions(60).secure).toBe(false);
     });
 
-    it('should emit Set-Cookie with SameSite=Lax', () => {
-      // 跨站请求不发送（大多数情况）
-      expect(true).toBe(true);
+    it('should always set HttpOnly, SameSite=Lax, Path=/ and the given Max-Age', async () => {
+      const { getCookieOptions } = await loadCookie(true);
+      const opts = getCookieOptions(123);
+      expect(opts.httpOnly).toBe(true);
+      expect(opts.sameSite).toBe('lax');
+      expect(opts.path).toBe('/');
+      expect(opts.maxAge).toBe(123);
     });
 
-    it('should emit Set-Cookie with Path=/', () => {
-      // 整个站点都可以访问
-      expect(true).toBe(true);
+    it('should omit Domain (host-only cookie) when cookieDomain is unset', async () => {
+      const { getCookieOptions } = await loadCookie(true);
+      expect(getCookieOptions(1).domain).toBeUndefined();
     });
 
-    it('should NOT include Domain attribute in Set-Cookie when COOKIE_DOMAIN is unset', () => {
-      // Host-only cookie 最安全
-      expect(true).toBe(true);
-    });
-
-    it('should NOT include Partitioned attribute', () => {
-      // 不使用分区 cookie
-      expect(true).toBe(true);
-    });
-
-    it('should set Max-Age to min(SESSION_TTL_SECONDS, (absoluteExpiresAt - now) / 1000)', () => {
-      // 滑动过期：取会话 TTL 和绝对过期时间的较小值
-      expect(true).toBe(true);
+    it('should include Domain when cookieDomain is set', async () => {
+      const { getCookieOptions } = await loadCookie(true, 'app.example.com');
+      expect(getCookieOptions(1).domain).toBe('app.example.com');
     });
   });
 });

@@ -34,6 +34,7 @@ vi.mock('@/lib/config', () => ({
       cmsBasePath: '/api',
       timeoutMs: 5000,
     },
+    app: { secureTransport: false }, // 對齊既有測試：SESSION_COOKIE_NAME='sid'（見 session_revoked 測試）
   },
 }));
 

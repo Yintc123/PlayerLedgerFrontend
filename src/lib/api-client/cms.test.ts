@@ -17,7 +17,10 @@ vi.mock('./client', () => ({
 }));
 
 vi.mock('@/lib/config', () => ({
-  config: { api: { baseUrl: 'http://api:8080', cmsBasePath: '/api', timeoutMs: 20000 } },
+  config: {
+    api: { baseUrl: 'http://api:8080', cmsBasePath: '/api', timeoutMs: 20000 },
+    app: { secureTransport: true },
+  },
 }));
 
 import { cmsRequest } from './cms';

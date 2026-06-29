@@ -62,6 +62,12 @@ export function createConfig() {
     },
     app: {
       publicOrigin: required('PUBLIC_ORIGIN'),
+      // 是否以 HTTPS 對外服務。決定 Secure cookie / __Host- 前綴 / COOP。
+      // 未設時沿用 NODE_ENV（production=secure），保留既有行為；
+      // ALB 直連 HTTP 的部署設 SECURE_TRANSPORT=false 降級，否則瀏覽器拒收 __Host-/Secure cookie → 登不進去。
+      secureTransport: process.env.SECURE_TRANSPORT
+        ? process.env.SECURE_TRANSPORT === 'true'
+        : process.env.NODE_ENV === 'production',
       allowedOrigins: new Set([
         required('PUBLIC_ORIGIN'),
         ...(process.env.ALLOWED_ORIGINS_EXTRA?.split(',')
