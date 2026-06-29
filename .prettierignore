@@ -12,6 +12,10 @@ build
 # prettier 預設會 re-flow markdown 表格與段落，造成大量無語意 diff。
 docs/
 
+# 從後端逐位元組同步的 OpenAPI 契約（單一可信來源在 PlayerLedgerBackend）；
+# prettier 重排會讓它與後端來源不一致，re-sync 變成髒 diff。見 src/schema/README.md
+src/schema/openapi.yaml
+
 # Next.js 自動生成
 next-env.d.ts
 
