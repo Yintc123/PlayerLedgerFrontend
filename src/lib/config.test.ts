@@ -159,6 +159,30 @@ describe('config', () => {
       expect(config.isProd).toBe(false);
     });
 
+    it('should default secureTransport to true in production when SECURE_TRANSPORT is unset', () => {
+      (process.env as Record<string, string>).NODE_ENV = 'production';
+      delete process.env.SECURE_TRANSPORT;
+      expect(createConfig().app.secureTransport).toBe(true);
+    });
+
+    it('should default secureTransport to false in development when SECURE_TRANSPORT is unset', () => {
+      (process.env as Record<string, string>).NODE_ENV = 'development';
+      delete process.env.SECURE_TRANSPORT;
+      expect(createConfig().app.secureTransport).toBe(false);
+    });
+
+    it('should force secureTransport false when SECURE_TRANSPORT=false even in production (ALB HTTP 直連)', () => {
+      (process.env as Record<string, string>).NODE_ENV = 'production';
+      process.env.SECURE_TRANSPORT = 'false';
+      expect(createConfig().app.secureTransport).toBe(false);
+    });
+
+    it('should force secureTransport true when SECURE_TRANSPORT=true', () => {
+      (process.env as Record<string, string>).NODE_ENV = 'development';
+      process.env.SECURE_TRANSPORT = 'true';
+      expect(createConfig().app.secureTransport).toBe(true);
+    });
+
     it('should parse ALLOWED_ORIGINS_EXTRA into the allowedOrigins set', () => {
       process.env.ALLOWED_ORIGINS_EXTRA = 'https://api.example.com,https://app.example.com';
       const config = createConfig();

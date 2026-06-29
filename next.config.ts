@@ -13,7 +13,12 @@ const SECURITY_HEADERS = [
     value: 'camera=(), microphone=(), geolocation=(), interest-cohort=()',
   },
   { key: 'X-Frame-Options', value: 'DENY' },
-  { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
+  // COOP 是 secure-context-only header，在 HTTP 下會被瀏覽器忽略並噴 console warning。
+  // ALB 直連 HTTP 的部署以 SECURE_TRANSPORT=false（build 時）省略它，避免雜訊。
+  // ⚠️ headers() 在 build 時求值，此旗標須於 docker build 階段注入（見 Dockerfile）。
+  ...(process.env.SECURE_TRANSPORT === 'false'
+    ? []
+    : [{ key: 'Cross-Origin-Opener-Policy', value: 'same-origin' }]),
   { key: 'Cross-Origin-Resource-Policy', value: 'same-origin' },
 ];
 

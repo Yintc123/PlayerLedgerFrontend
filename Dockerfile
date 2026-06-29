@@ -46,6 +46,12 @@ ARG APP_VERSION=unknown
 ENV APP_VERSION=${APP_VERSION}
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# SECURE_TRANSPORT 在 build 時影響 next.config 的 COOP header（headers() 於 build 期求值）。
+# HTTP 部署（如 ALB 直連）以 --build-arg SECURE_TRANSPORT=false 省略 COOP，避免 console warning。
+# 注意：cookie 的 Secure/__Host- 是 runtime 由 config.ts 讀同名 env 決定，須在 ECS task 另行設定。
+ARG SECURE_TRANSPORT=true
+ENV SECURE_TRANSPORT=${SECURE_TRANSPORT}
+
 # config.ts 在 module load 時 fail-fast 驗證必填 env（REDIS_HOST/API_BASE_URL/...）。
 # next build 收集 page data 會 import 到 config，故 build 階段需佔位值。
 # 這些只在 build 期有效，runtime 由 ECS task definition 的 env/secrets 覆蓋。
