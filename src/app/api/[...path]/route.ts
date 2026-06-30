@@ -194,7 +194,14 @@ async function handleProxy(req: NextRequest, ctx: { params: Promise<{ path: stri
       responseHeaders.delete(header);
     });
 
-    return new Response(responseBody, {
+    // null-body status（204 / 205 / 304）不可帶 body，否則 Response 建構子會丟錯 →
+    // 被 catch 區誤判為 upstream_failure 回 502（曾為潛在 bug）。
+    const isNullBodyStatus =
+      upstreamResponse.status === 204 ||
+      upstreamResponse.status === 205 ||
+      upstreamResponse.status === 304;
+
+    return new Response(isNullBodyStatus ? null : responseBody, {
       status: upstreamResponse.status,
       headers: responseHeaders,
     });
@@ -203,7 +210,20 @@ async function handleProxy(req: NextRequest, ctx: { params: Promise<{ path: stri
 
     // 處理特定錯誤
     if (err instanceof Error && err.name === 'AbortError') {
-      reqLogger.error({ type: 'proxy.timeout' }, 'Upstream timeout');
+      // 區分 client 斷線 vs BFF hard timeout（spec 01 §4.2）
+      if (req.signal.aborted) {
+        // client 斷線：socket 已被 runtime 關閉，無法再寫 response body。
+        // 僅 log/metric tag upstream.client_closed（仿 nginx 499 語意，非 HTTP status），
+        // 重新 throw 讓 fetch 中止、後續 response 由 Next.js runtime 自行處理。
+        reqLogger.warn(
+          { type: 'upstream.client_closed', requestId },
+          'Client disconnected; upstream fetch aborted'
+        );
+        throw err;
+      }
+
+      // AbortSignal.timeout 觸發 → BFF hard timeout
+      reqLogger.error({ type: 'proxy.timeout', requestId }, 'Upstream timeout');
       return NextResponse.json(
         {
           error: 'upstream_timeout',
