@@ -110,21 +110,26 @@ export type ClientSession = {
 
 注入流程同 [`02 §2.5`](./02-auth-session.md)：`(cms)/layout.tsx` 在 SSR 時讀 access token，decode 後 hydrate。
 
-### 3.4 前端使用
+### 3.4 前端使用（角色感知 UI）
+
+角色感知 UI 的代表是「匯出 CSV」與「建立儲值」按鈕：依 `session.role` 決定**是否渲染**，但這只是 UX，安全邊界在資料層（後端回什麼）。
 
 ```tsx
 'use client'
 import { useSession } from '@/lib/session/client-session'
 
-export function ExportButton() {
-  const session = useSession()
-  // 可匯出 = admin 或 user；viewer 不可
-  if (session.role === 'viewer') return null
-  return <button>匯出 CSV</button>
+// 匯出 CSV：從「已取得的列表 data」在 client 端產檔（無後端 export 端點，見 §4.1）
+export function ExportButton({ records }: { records: DepositRecord[] }) {
+  const { role } = useSession()
+  // 可匯出 = admin 或 user；viewer 隱藏（純 UX）
+  if (role !== 'admin' && role !== 'user') return null
+  return <button onClick={() => downloadCsv(records)}>匯出 CSV</button>
 }
 ```
 
-> **記住**：`return null` 只是 UX。實際匯出端點呼叫時，後端會再驗一次。若 attacker 直接打 `/api/players/.../topups/export` 而前端從未渲染按鈕，**後端仍會回 403**——這是本架構的安全保證。
+> **client 端匯出的安全模型**：匯出鈕**只能匯出後端已經回給瀏覽器的 `data`**——viewer 即使繞過 `return null`（改 DOM／直接呼叫函式），也匯不出後端沒回的欄位。因此真正的邊界是「後端在 `/cms/deposit-records` 回應裡，依 role 給了什麼」，**不是**這顆按鈕。原先「attacker 直打 export 端點、後端回 403」的保證已不適用——**後端沒有 export 端點**（§4.1）。
+
+> ⚠️ **已知缺口（待後端遮罩）**：後端目前在 CMS deposit-records 回應中**未**對 viewer 遮罩 `internalNote` / `operatorIp` / `referenceNo`，viewer 在螢幕與 Network 都看得到原值（§5）。前端 v1 匯出僅含「螢幕可見欄位」（不含 `internalNote` / `operatorIp`）以避免放大外洩，但這是 UX 緩解、**非**安全保證；徹底修法須後端依 role 遮罩——見 §5、§11。
 
 > **role 比對寫法**：`session.role === 'admin'` 或 `session.role !== 'viewer'`。**不要**寫 `session.roles.includes(...)`（roles 陣列是舊設計，已廢）。
 
@@ -136,16 +141,20 @@ export function ExportButton() {
 
 ### 4.1 玩家儲值查詢工具
 
-| 操作 | 對應端點（規劃中） | admin | user | viewer |
+| 操作 | 對應端點 | admin | user | viewer |
 |---|---|:-:|:-:|:-:|
-| 搜尋玩家 | `GET /players/search` | ✅ | ✅ | ✅ |
-| 看玩家詳情 | `GET /players/{id}` | ✅ | ✅ | ✅ |
-| 看玩家儲值彙總 | `GET /players/{id}/topups/summary` | ✅ | ✅ | ✅ |
-| 看玩家儲值列表 | `GET /players/{id}/topups` | ✅ | ✅ | ✅ |
-| 看單筆儲值明細 | `GET /players/{id}/topups/{recordId}` | ✅ | ✅ | ✅ |
-| 同步匯出 CSV | `GET /players/{id}/topups/export?format=csv` | ✅ | ✅ |  |
-| 觸發 async 匯出 | `POST /players/{id}/topups/export/async` | ✅ | ✅ |  |
-| 看匯出 job 狀態 | `GET /exports/{jobId}` | ✅ | ✅ |  |
+| 搜尋玩家 | `GET /cms/players` | ✅ | ✅ | ✅ |
+| 看玩家詳情 | `GET /cms/players/{id}` | ✅ | ✅ | ✅ |
+| 看玩家儲值彙總 | `GET /cms/players/{id}/topup-summary` | ✅ | ✅ | ✅ |
+| 看儲值列表 | `GET /cms/deposit-records?player_id=` | ✅ | ✅ | ✅ |
+| 看單筆儲值明細 | `GET /cms/deposit-records/{id}` | ✅ | ✅ | ✅ |
+| 建立儲值 | `POST /cms/deposit-records` | ✅ | ✅ |  |
+| 更新狀態／備註 | `PATCH /cms/deposit-records/{id}` | ✅ |  |  |
+| 匯出 CSV | **前端 client 端**（從列表 `data` 產檔，無後端端點） | ✅ | ✅ |  |
+
+> **匯出無後端端點**：後端 OpenAPI 未提供任何 CSV / export 端點（同步或 async 皆無；見 [`06 §8`](./06-topup-records-domain.md)）。v1 由前端從「當前篩選頁的列表 `data`」在 client 端產 CSV（UTF-8 BOM），匯出鈕對 viewer 隱藏為**純 UX**——viewer 只能匯出後端已回的欄位（§3.4）。若未來需「匯出全部符合篩選結果」（跨頁）或伺服器端稽核，再評估後端專屬 export 端點。
+>
+> **更新狀態（PATCH）限 admin**、**建立（POST）限 admin / user**，對齊 [`06 §6A`](./06-topup-records-domain.md) / [`06 §6B`](./06-topup-records-domain.md)。viewer 對兩者皆 403。
 
 ### 4.2 CMS 使用者管理（後端 [`cms-users-api.md §2`](../../PlayerLedgerBackend/docs/specs/cms-users-api.md) 既定）
 
@@ -180,21 +189,24 @@ export function ExportButton() {
 | `phone` | 全 | 全 | 遮罩（`+886***5678`） |
 | `status` | 全 | 全 | 全 |
 | `registeredAt` / `lastActiveAt` | 全 | 全 | 全 |
-| `recordId` / `playerId`（儲值） | 全 | 全 | 全 |
-| `orderId` | 全 | 全 | 全 |
+| `id` / `playerId` / `playerName`（儲值） | 全 | 全 | 全 |
 | `amount` / `currency` | 全 | 全 | 全 |
-| `paymentMethod` | 全 | 全 | 全 |
-| `paymentChannel` | 全 | 全 | `null`（不看） |
-| `failureReason` | 全 | 全 | 全 |
-| 時間欄位 | 全 | 全 | 全 |
+| `paymentMethod` / `status` | 全 | 全 | 全 |
+| `displayNote` | 全 | 全 | 全 |
+| `referenceNo` | 全 | 全 | ⚠️ 全（**應遮罩，後端待辦**） |
+| `internalNote` | 全 | 全 | ⚠️ 全（**應遮罩，後端待辦**） |
+| `operatorId` / `operatorIp` | 全 | 全 | ⚠️ 全（**應遮罩，後端待辦**） |
+| 時間欄位（`createdAt` / `updatedAt`） | 全 | 全 | 全 |
+
+> **後端模型已無 `orderId` / `paymentChannel` / `failureReason`**：先前版本這三欄為前端推測，已隨 [`06 §2.1`](./06-topup-records-domain.md) 重整移除；本矩陣改列真實 `DepositRecord` 欄位。
 
 **遮罩規則**（viewer 視角）：
 
-| 欄位 | viewer 看到 |
-|---|---|
-| `email` | local-part 首字 + `***@` + 完整 domain（如 `a***@gmail.com`）；長度不暗示原長度 |
-| `phone` | 國碼 + `***` + 末 4 碼（如 `+886***5678`）；空字串以 `null` 取代不暗示「沒填」 |
-| `paymentChannel` | `null`——viewer 不需要也不該知道哪家金流商，避免推導出商業條款 |
+| 欄位 | viewer 應看到（理想） | 現況 |
+|---|---|---|
+| `email`（玩家端點） | local-part 首字 + `***@` + 完整 domain（如 `a***@gmail.com`）；長度不暗示原長度 | 後端遮罩 |
+| `phone`（玩家端點） | 國碼 + `***` + 末 4 碼（如 `+886***5678`）；空字串以 `null` 取代不暗示「沒填」 | 後端遮罩 |
+| `internalNote` / `operatorId` / `operatorIp` / `referenceNo`（儲值端點） | `null`——staff 內部／金流敏感資訊，viewer 不該看 | ⚠️ **後端目前未遮罩**，viewer 取得完整原值；列為後端待辦（§11）。前端 client 匯出 v1 以「不含 `internalNote` / `operatorIp` 欄位」緩解，但非安全保證 |
 
 **為何遮罩在後端**：
 
@@ -229,7 +241,8 @@ export function ExportButton() {
 | `/players/[playerId]` | 同上 |
 | `/players/[playerId]/topups` | 同上 |
 | `/players/[playerId]/topups/[recordId]` | 同上 |
-| `/players/[playerId]/topups/export`（若有獨立頁面） | navbar 不顯示給 `role === 'viewer'`；直接訪問見「顯示 forbidden 錯誤態」 |
+
+> **匯出無獨立路由**：CSV 匯出是列表頁（[`10`](./10-screen-topup-list.md)）上的 client 端按鈕（§3.4），非獨立頁面／路由；對 viewer 隱藏為純 UX。
 
 `(cms)/layout.tsx` 已處理「未登入 → redirect /login」，本規格**不**加 layout 層的角色 guard——角色檢查交給 API 呼叫的 403 結果統一呈現。原因：
 
@@ -274,23 +287,23 @@ BFF 的責任只有「把足以識別操作者的 context 透傳給後端」：
 
 | 建議 event 字串 | 觸發點 | 紀錄欄位（最少集） |
 |---|---|---|
-| `players.search` | 後端在 `/players/search` 成功回應時 | `userId, role, query, result_count, request_id, ip, occurred_at` |
-| `players.read` | 後端在 `/players/{id}` 成功回應時 | `userId, role, target_player_id, request_id, occurred_at` |
-| `topups.list` | `/players/{id}/topups` 成功回應時 | `userId, role, target_player_id, filters, result_count, request_id, occurred_at` |
-| `topups.read` | `/players/{id}/topups/{recordId}` 成功回應時 | `userId, role, target_player_id, record_id, request_id, occurred_at` |
-| `topups.summary` | `/players/{id}/topups/summary` 成功回應時 | `userId, role, target_player_id, request_id, occurred_at` |
-| `topups.export.request` | async 匯出 job 被建立時 | `userId, role, target_player_id, filters, format, request_id, occurred_at` |
-| `topups.export.complete` | async job 完成或同步匯出回應時 | `userId, job_id (async only), target_player_id, row_count, file_size_bytes, request_id, occurred_at` |
+| `players.search` | 後端在 `GET /cms/players` 成功回應時 | `userId, role, query, result_count, request_id, ip, occurred_at` |
+| `players.read` | 後端在 `GET /cms/players/{id}` 成功回應時 | `userId, role, target_player_id, request_id, occurred_at` |
+| `topups.list` | `GET /cms/deposit-records` 成功回應時 | `userId, role, target_player_id, filters, result_count, request_id, occurred_at` |
+| `topups.read` | `GET /cms/deposit-records/{id}` 成功回應時 | `userId, role, record_id, request_id, occurred_at` |
+| `topups.summary` | `GET /cms/players/{id}/topup-summary` 成功回應時 | `userId, role, target_player_id, request_id, occurred_at` |
 
 > **為何 query / filters 也記**：稽核需回答「2026-06-28 14:00 誰對玩家 A 做了什麼條件的搜尋」；只記 `result_count` 無法重建調查上下文。
 >
 > **`role` 欄位拿單值字串**（對齊 §3 single role 設計），不要寫陣列。
+>
+> **CSV 匯出無獨立稽核事件（v1）**：匯出是前端 client 端對「已取得的列表 `data`」產檔（§3.4），後端**看不到**這個動作，故無 `topups.export.*` 事件——但底層那次 `GET /cms/deposit-records`（`topups.list`）本來就被稽核，已能回答「誰在何時看了哪些紀錄」。若未來需獨立記錄匯出意圖／列數／檔案大小，須改走後端 export 端點，屆時再新增 `topups.export.request` / `topups.export.complete`（含 `filters, format, row_count, file_size_bytes`）。
 
 ### 8.4 不記的事件
 
 - **失敗的請求**（4xx / 5xx）——失敗未實際看到資料，記之意義有限；惟 403 `forbidden` 後端可選擇記為「越權嘗試」（建議記，本規格不強制）
 - **未認證請求**（401）——尚未識別操作者，記無意義
-- **`GET /exports/{jobId}` 輪詢**——輪詢不存取玩家資料本身，僅查 job 狀態；避免稽核被輪詢淹沒
+- **前端 client 端 CSV 匯出**——不經後端，後端無從記錄；底層列表查詢（`topups.list`）已稽核（見 §8.3）
 
 ### 8.5 儲存
 
@@ -343,27 +356,29 @@ it('should never include accessToken / refreshToken / sid in value')   // 同 sp
 ### 10.3 角色感知 UI（在各 screen test 中執行）
 
 ```ts
-// spec 10 _components/export-button.test.tsx
+// spec 10 _components/export-button.test.tsx（client 端匯出，角色顯隱）
 it('should render Export button when session.role is "admin"')
 it('should render Export button when session.role is "user"')
 it('should NOT render Export button when session.role is "viewer"')
-
-// spec 11 _components/payment-channel.test.tsx
-it('should render paymentChannel value when not null')
-it('should render "—" when paymentChannel is null (server returned masked / forbidden)')
-it('should NOT check session.role to decide rendering — purely data-driven')
+it('should generate a CSV download from the provided records on click')
 ```
 
-> 注意 §6 原則：UI 元件**不**依 `session.role` 決定欄位顯示——資料層由後端控制 `null` vs 原值，元件純看資料。`ExportButton` 是例外（決定「按鈕是否渲染」，非「資料是否顯示」）。
+> CSV 產生純函式的測試（BOM / 跳脫 / 欄位選擇 / 金額整數原值）見 [`06 §11.7`](./06-topup-records-domain.md) `export-csv.test.ts`。
+>
+> 注意 §6 原則：UI 元件**不**依 `session.role` 決定欄位顯示——資料層由後端控制 `null` vs 原值，元件純看資料。`ExportButton` 是例外（決定「按鈕是否渲染」，非「資料是否顯示」），且其匯出來源僅限後端已回的 `data`。
+>
+> 先前的 `payment-channel.test.tsx` 已移除——`paymentChannel` 欄位不在後端模型（[`06 §2.1`](./06-topup-records-domain.md)）。
 
 ### 10.4 端到端 forbidden 流程（Playwright）
 
 ```ts
-test('viewer role cannot trigger CSV export and sees no Export button on topup list')
-test('viewer role directly navigating to export URL sees forbidden ErrorState')
-test('user role can trigger sync CSV export and downloads file')
-test('admin role can trigger sync CSV export and downloads file')
+test('viewer role sees no Export button on topup list')
+test('user role sees Export button and clicking downloads a CSV of the current page')
+test('admin role sees Export button and clicking downloads a CSV of the current page')
+test('viewer directly hitting a no-permission action (e.g. create) sees forbidden ErrorState')
 ```
+
+> 匯出無後端端點，故原「直接打 export URL 見 forbidden」的 e2e 已移除；改驗按鈕顯隱與 client 端下載。
 
 ### 10.5 不在本規格的測試
 
@@ -378,7 +393,8 @@ test('admin role can trigger sync CSV export and downloads file')
 > 與 PM / 安全團隊對齊後更新：
 
 - [ ] 越權嘗試（後端拒絕 403 的請求）是否寫稽核？建議是，但需確認儲存量
-- [ ] CSV 匯出對 `viewer` 是否完全不可用，或可匯出但全欄位遮罩？v1 採前者（完全不可），影響 §4 與後端規格
+- [x] **CSV 匯出對 viewer**：v1 採前端 client 端匯出「當前篩選頁的螢幕可見欄位」，匯出鈕對 viewer 隱藏（純 UX）；不含 `internalNote` / `operatorIp`。未做「匯出全部符合篩選」（跨頁）與伺服器端稽核——待需求出現再評估後端 export 端點
+- [ ] ⚠️ **後端對 viewer 遮罩 deposit-records 敏感欄位**：已確認後端目前**未**對 viewer 遮罩 `internalNote` / `operatorIp` / `referenceNo`，viewer 取得完整原值（§5）。需後端依 role 遮罩——這才是真正的安全邊界，前端 client 匯出的欄位選擇只是緩解
 - [ ] viewer 看到遮罩資料時，UI 是否需特別標示「您目前以 viewer 身份檢視」banner？v1 不做；若 PM 要求，加 client-side banner（純 UX，不影響資料層）
 - [ ] `decodeAccessToken` 不驗簽是否需 ADR 記錄理由？建議是（avoid future surprise）
 - [ ] 後端業務事件（§8.3）落地時程？需與後端 owner 對齊；落地時更新本表並刪除「待後端實作」字樣
