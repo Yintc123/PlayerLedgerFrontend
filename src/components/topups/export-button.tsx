@@ -38,7 +38,13 @@ export function ExportButton({
   }
 
   return (
-    <Button type="button" size="sm" variant="outline" onClick={handleExport}>
+    <Button
+      type="button"
+      size="sm"
+      variant="outline"
+      onClick={handleExport}
+      data-component="ExportButton"
+    >
       <Download className="size-4" aria-hidden="true" />
       匯出 CSV
     </Button>

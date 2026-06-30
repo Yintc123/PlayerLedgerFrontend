@@ -70,6 +70,7 @@ export function Pagination({
 
   return (
     <nav
+      data-component="Pagination"
       aria-label="分頁"
       aria-busy={pending}
       className="flex items-center justify-center gap-1 py-4"

@@ -85,7 +85,10 @@ export function IdleWarningModal({ countdownSec, onContinue, onLogoutNow }: Idle
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+    <div
+      data-component="IdleWarningModal"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+    >
       <div
         ref={dialogRef}
         role="alertdialog"

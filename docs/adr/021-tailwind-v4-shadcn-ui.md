@@ -101,6 +101,7 @@ src/components/ui/
 7. **字型統一**：Inter（透過 `next/font/google`），CSS variable `--font-inter` → `--font-sans`；元件 className 寫 `font-sans` 即可。
 8. **icon 統一用 lucide-react**：不混用 heroicons / phosphor 等其他 icon set，避免兩套線條風格並存。
 9. **互動按鈕一律 `cursor-pointer`**：Tailwind v4 的 preflight 把 `button` 的預設 cursor 改回 `default`（v3 為 `pointer`），故所有可點擊按鈕需顯式加 `cursor-pointer`。共用 `src/components/ui/button.tsx` 的 base class 已內建（涵蓋所有 `<Button>`）；少數手寫的原生 `<button>` 也須各自加上。disabled 狀態靠 `disabled:pointer-events-none` 自動不顯示游標，無需 `disabled:cursor-*`。此慣例由 `button.test.tsx` 鎖定。
+10. **共用元件最外層節點加 `data-component`**：值為元件 PascalCase 名、置於 `data-slot` 之後 `{...props}` 之前（可覆寫），用於 devtools / production / `querySelector` 定位元件。與 `data-slot`（標部位）正交。完整規則與範圍見 [ADR 023](./023-data-component-attribute.md)。
 
 ### 何時重新評估
 

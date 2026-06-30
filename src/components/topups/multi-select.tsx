@@ -50,6 +50,7 @@ export function MultiSelect({
       <PopoverTrigger asChild>
         <button
           type="button"
+          data-component="MultiSelect"
           aria-haspopup="listbox"
           className={cn(
             'border-input flex h-9 min-w-40 items-center gap-1.5 rounded-md border bg-transparent px-3 text-sm shadow-xs outline-none',
