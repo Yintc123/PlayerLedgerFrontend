@@ -3,6 +3,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { ApiError } from '@/lib/api/errors';
+import { SessionProvider, type ClientSession } from '@/lib/session/client-session';
+import type { ReactNode } from 'react';
 import type { DepositRecord } from '@/lib/topups/types';
 
 const listDepositsMock = vi.fn();
@@ -44,6 +46,19 @@ function result(records: DepositRecord[], total = records.length) {
   return { records, page: 1, pageSize: 20, total };
 }
 
+// DepositsResult 在受保護的 (cms) 區段執行，實際由 layout 提供 SessionProvider；
+// 測試時包一層（admin 角色，使 ExportButton 渲染）。
+const adminSession: ClientSession = {
+  userId: 'u1',
+  clientId: 'cms-web',
+  absoluteExpiresAt: 0,
+  createdAt: 0,
+  role: 'admin',
+};
+function renderResult(node: ReactNode) {
+  return render(<SessionProvider initialSession={adminSession}>{node}</SessionProvider>);
+}
+
 beforeEach(() => {
   listDepositsMock.mockReset();
   recordMetricMock.mockReset();
@@ -52,32 +67,44 @@ beforeEach(() => {
 describe('DepositsResult', () => {
   it('should call listDeposits with the parsed query (NO playerId → all players)', async () => {
     listDepositsMock.mockResolvedValue(result([]));
-    render(await DepositsResult({ query: { status: ['pending'] } }));
+    renderResult(await DepositsResult({ query: { status: ['pending'] } }));
     expect(listDepositsMock).toHaveBeenCalledWith({ status: ['pending'] });
   });
 
   it('should call listDeposits with playerId when focused', async () => {
     listDepositsMock.mockResolvedValue(result([]));
-    render(await DepositsResult({ query: { playerId: 'P1' } }));
+    renderResult(await DepositsResult({ query: { playerId: 'P1' } }));
     expect(listDepositsMock).toHaveBeenCalledWith({ playerId: 'P1' });
   });
 
   it('should render ResultTable with rows across multiple players when records > 0', async () => {
     listDepositsMock.mockResolvedValue(result([makeRecord('a', 'p1'), makeRecord('b', 'p2')]));
-    render(await DepositsResult({ query: {} }));
+    renderResult(await DepositsResult({ query: {} }));
     expect(screen.getByRole('table')).toBeInTheDocument();
     expect(screen.getAllByRole('row')).toHaveLength(3); // header + 2
   });
 
   it('should render no-results EmptyState when records is empty', async () => {
     listDepositsMock.mockResolvedValue(result([]));
-    render(await DepositsResult({ query: {} }));
+    renderResult(await DepositsResult({ query: {} }));
     expect(screen.getByText('無符合條件的儲值紀錄')).toBeInTheDocument();
+  });
+
+  it('should render an ExportButton (匯出 CSV) when records > 0', async () => {
+    listDepositsMock.mockResolvedValue(result([makeRecord('a')]));
+    renderResult(await DepositsResult({ query: {} }));
+    expect(screen.getByRole('button', { name: /匯出 CSV/ })).toBeInTheDocument();
+  });
+
+  it('should NOT render an ExportButton when records is empty', async () => {
+    listDepositsMock.mockResolvedValue(result([]));
+    renderResult(await DepositsResult({ query: {} }));
+    expect(screen.queryByRole('button', { name: /匯出 CSV/ })).toBeNull();
   });
 
   it('should render the ActivePlayerChip with the focused playerName when playerId is set', async () => {
     listDepositsMock.mockResolvedValue(result([makeRecord('a', 'P1')]));
-    render(await DepositsResult({ query: { playerId: 'P1' } }));
+    renderResult(await DepositsResult({ query: { playerId: 'P1' } }));
     expect(screen.getByText('目前聚焦玩家：')).toBeInTheDocument();
     // 名稱同時出現在 chip 與列內玩家連結，故用 getAllByText
     expect(screen.getAllByText('玩家 P1').length).toBeGreaterThan(0);
@@ -85,20 +112,20 @@ describe('DepositsResult', () => {
 
   it('should render numbered pagination when more pages remain (meta passed to Pagination)', async () => {
     listDepositsMock.mockResolvedValue(result([makeRecord('a')], 40)); // 40/20 = 2 頁
-    render(await DepositsResult({ query: {} }));
+    renderResult(await DepositsResult({ query: {} }));
     expect(screen.getByRole('navigation', { name: '分頁' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '2' })).toBeInTheDocument();
   });
 
   it('should render forbidden ErrorState on 403', async () => {
     listDepositsMock.mockRejectedValue(new ApiError(403, 'forbidden'));
-    render(await DepositsResult({ query: {} }));
+    renderResult(await DepositsResult({ query: {} }));
     expect(screen.getByText('無權檢視儲值紀錄')).toBeInTheDocument();
   });
 
   it('should render rate-limited ErrorState on 429', async () => {
     listDepositsMock.mockRejectedValue(new ApiError(429, 'too_many_requests', undefined, 5));
-    render(await DepositsResult({ query: {} }));
+    renderResult(await DepositsResult({ query: {} }));
     expect(screen.getByText('請求過於頻繁')).toBeInTheDocument();
   });
 
@@ -109,13 +136,13 @@ describe('DepositsResult', () => {
 
   it('should emit deposits.list.result_count metric on render', async () => {
     listDepositsMock.mockResolvedValue(result([makeRecord('a')]));
-    render(await DepositsResult({ query: {} }));
+    renderResult(await DepositsResult({ query: {} }));
     expect(recordMetricMock).toHaveBeenCalledWith('deposits.list.result_count', { count: 1 });
   });
 
   it('should emit deposits.list.player_focus metric when playerId is present', async () => {
     listDepositsMock.mockResolvedValue(result([makeRecord('a', 'P1')]));
-    render(await DepositsResult({ query: { playerId: 'P1' } }));
+    renderResult(await DepositsResult({ query: { playerId: 'P1' } }));
     expect(recordMetricMock).toHaveBeenCalledWith('deposits.list.player_focus', { playerId: 'P1' });
   });
 });

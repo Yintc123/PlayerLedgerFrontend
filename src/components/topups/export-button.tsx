@@ -7,17 +7,25 @@ import { toDepositCsv } from '@/lib/topups/export-csv';
 import type { DepositRecord } from '@/lib/topups/types';
 
 /**
- * 「匯出 CSV」入口（spec 10 §7.3）。僅 admin / user 可見（viewer 隱藏，純 UX）。
+ * 「匯出 CSV」入口（spec 10 §7.3、spec 14 §B5.4）。僅 admin / user 可見（viewer 隱藏，純 UX）。
  *
  * 從已取得的當前頁 `records` 在 client 端產 CSV（含 UTF-8 BOM）下載，**無後端端點**。
  * 僅匯出螢幕可見欄位，不含 internalNote / operatorId / operatorIp（spec 07 §5）。
+ *
+ * `includePlayerId`（spec 14 A4.1）：跨玩家頁多帶「玩家 ID」欄；單玩家頁省略（預設 false）。
  */
-export function ExportButton({ records }: { records: DepositRecord[] }) {
+export function ExportButton({
+  records,
+  includePlayerId = false,
+}: {
+  records: DepositRecord[];
+  includePlayerId?: boolean;
+}) {
   const { role } = useSession();
   if (role !== 'admin' && role !== 'user') return null;
 
   function handleExport() {
-    const csv = toDepositCsv(records);
+    const csv = toDepositCsv(records, { includePlayerId });
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
