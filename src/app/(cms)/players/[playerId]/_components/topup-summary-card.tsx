@@ -60,11 +60,11 @@ function CurrencySubCard({ totals }: { totals: CurrencyTotals }) {
       <dl className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
         <dt className="text-muted-foreground">成功總額</dt>
         <dd className="text-right tabular-nums">
-          {formatAmount(totals.successAmount, totals.currency)}
+          {formatAmount(totals.completedAmount, totals.currency)}
         </dd>
 
         <dt className="text-muted-foreground">成功筆數</dt>
-        <dd className="text-right tabular-nums">{totals.successCount}</dd>
+        <dd className="text-right tabular-nums">{totals.completedCount}</dd>
 
         <dt className="text-muted-foreground">退款總額</dt>
         <dd className="text-right tabular-nums">
