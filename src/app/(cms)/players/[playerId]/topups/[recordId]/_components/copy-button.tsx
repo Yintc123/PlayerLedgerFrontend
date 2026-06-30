@@ -45,7 +45,7 @@ export function CopyButton({
       aria-label={`複製${label}`}
       onClick={handleClick}
       className={cn(
-        'focus-visible:ring-ring inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-slate-500 outline-none hover:bg-slate-100 hover:text-slate-700 focus-visible:ring-2',
+        'focus-visible:ring-ring inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-xs text-slate-500 outline-none hover:bg-slate-100 hover:text-slate-700 focus-visible:ring-2',
         className
       )}
     >

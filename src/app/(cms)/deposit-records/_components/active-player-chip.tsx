@@ -40,7 +40,7 @@ export function ActivePlayerChip({
           type="button"
           aria-label="清除玩家聚焦"
           onClick={clear}
-          className="hover:text-foreground rounded-full outline-none focus-visible:ring-2"
+          className="hover:text-foreground cursor-pointer rounded-full outline-none focus-visible:ring-2"
         >
           <X className="size-3.5" aria-hidden="true" />
         </button>

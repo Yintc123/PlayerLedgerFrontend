@@ -93,6 +93,7 @@ src/components/ui/
 6. **dark mode 在 v1 不啟用但保留結構**：`globals.css` 預留 `.dark` selector（`@custom-variant dark`）；未來只需新增 `.dark { --background: ...; ... }` 區塊與 `<html class="dark">` toggle，無需重構元件。
 7. **字型統一**：Inter（透過 `next/font/google`），CSS variable `--font-inter` → `--font-sans`；元件 className 寫 `font-sans` 即可。
 8. **icon 統一用 lucide-react**：不混用 heroicons / phosphor 等其他 icon set，避免兩套線條風格並存。
+9. **互動按鈕一律 `cursor-pointer`**：Tailwind v4 的 preflight 把 `button` 的預設 cursor 改回 `default`（v3 為 `pointer`），故所有可點擊按鈕需顯式加 `cursor-pointer`。共用 `src/components/ui/button.tsx` 的 base class 已內建（涵蓋所有 `<Button>`）；少數手寫的原生 `<button>` 也須各自加上。disabled 狀態靠 `disabled:pointer-events-none` 自動不顯示游標，無需 `disabled:cursor-*`。此慣例由 `button.test.tsx` 鎖定。
 
 ### 何時重新評估
 
@@ -111,7 +112,8 @@ src/components/ui/
 | `src/app/globals.css` | 新增（Tailwind import + OKLCH 色票 + theme tokens） |
 | `src/app/layout.tsx` | 載入 globals.css + Inter font |
 | `src/lib/utils.ts` | 新增 `cn()` helper |
-| `src/components/ui/{button,input,label,card,alert}.tsx` | 新增（v1 5 個 shadcn primitive） |
+| `src/components/ui/{button,input,label,card,alert}.tsx` | 新增（v1 5 個 shadcn primitive）；`button` base class 含 `cursor-pointer`（強制要求 9） |
+| `src/components/ui/button.test.tsx` | 鎖定 `cursor-pointer` 慣例（強制要求 9） |
 | `docs/specs/02-auth-session.md` §3.1 / §9 / §12 | 新增「登入頁 UI 設計」小節 + 測試清單擴充 + 本 ADR cross-ref |
 | `docs/specs/08–11`（screen specs） | Server / Client 切割描述不變；元件名稱沿用 shadcn 提供的 Card / Button / Input / Label / Alert / Dialog 等；UI tooling 段落隱含採本 ADR |
 
