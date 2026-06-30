@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { beforeAll, describe, it, expect, vi } from 'vitest';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom/vitest';
 import { MultiSelect } from './multi-select';
@@ -10,6 +10,15 @@ const OPTIONS = [
   { value: 'failed', label: '失敗' },
   { value: 'refunded', label: '已退款' },
 ];
+
+// MultiSelect 走 Radix Popover；jsdom 缺其依賴的 pointer-capture / scrollIntoView。
+// 不 mock window.PointerEvent——Popover（modal=false）以 click 開啟、不需建構式；
+// 反而會干擾 user-event 對 checkbox 的 Space→click（見「Space 切換」測試）。
+beforeAll(() => {
+  window.HTMLElement.prototype.hasPointerCapture = vi.fn();
+  window.HTMLElement.prototype.releasePointerCapture = vi.fn();
+  window.HTMLElement.prototype.scrollIntoView = vi.fn();
+});
 
 describe('MultiSelect', () => {
   it('should render checkbox per option', async () => {
@@ -58,5 +67,21 @@ describe('MultiSelect', () => {
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
     expect(document.activeElement).toBe(trigger);
+  });
+
+  it('should close when clicking outside the dropdown', async () => {
+    const user = userEvent.setup();
+    render(
+      <div>
+        <button>外部</button>
+        <MultiSelect label="狀態" options={OPTIONS} selected={[]} onChange={() => {}} />
+      </div>
+    );
+    await user.click(screen.getByRole('button', { name: '狀態' }));
+    await screen.findByRole('listbox');
+
+    await user.click(screen.getByRole('button', { name: '外部' }));
+
+    await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument());
   });
 });

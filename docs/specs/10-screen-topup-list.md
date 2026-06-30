@@ -124,6 +124,8 @@ src/app/(cms)/players/[playerId]/topups/
 
 > 幣別下拉與金額區間已移除——後端 `GET /api/cms/deposit-records` 不支援 `currency` / `min_amount` / `max_amount` 篩選（見 [`06 §3.2`](./06-topup-records-domain.md)）。
 
+> **盒型一致性**：篩選列各控件統一 `h-9` 盒型。`SortSelect` 為原生 `<select>`，需以 `appearance-none` 隱藏 OS 原生箭頭、改自畫 `ChevronDown`（`pointer-events-none` 不攔點擊），並對齊 `min-w-40`，否則原生外觀會與其他 pill 控件不一致（垂直基線 / 箭頭風格 / 寬度跑版）。由 `sort-select.test.tsx` 鎖定。
+
 ### 4.2 行為
 
 | 行為 | 對應 |
@@ -148,6 +150,11 @@ src/app/(cms)/players/[playerId]/topups/
 ### 4.4 狀態 / 支付方式多選
 
 - `MultiSelect` 顯示 checkbox 清單；選中項以 chip 顯示在欄位內
+- **下拉面板走 Radix Popover**（`@/components/ui/popover`，[ADR 021 §強制要求 5](../adr/021-tailwind-v4-shadcn-ui.md)）：
+  - **外部點擊收回**、**Esc 收回並還焦 trigger** 由 Radix dismissable layer 兜底，元件不自寫事件監聽
+  - `modal={false}`：不 trap focus、不鎖背景捲動，符合篩選面板語義
+  - 面板內保留自寫上下鍵移焦（roving focus）與 Space 切換 checkbox
+  - 行為由 `multi-select.test.tsx` 鎖定：開啟渲染 checkbox / chip / Space 切換 / 上下鍵移焦 / Esc 收回還焦 / **外部點擊收回**
 - **多值編碼為重複 key**（`?status=pending&status=failed`），對齊後端 OpenAPI（`type: array`，重複出現做 OR）
 - 選項來源：
   - 狀態：五個值（`pending` / `completed` / `failed` / `cancelled` / `refunded`）+ 中文 label

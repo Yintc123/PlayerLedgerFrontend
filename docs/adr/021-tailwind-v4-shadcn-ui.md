@@ -4,6 +4,11 @@
 
 已採用（v1，2026-06-28；首次落地於 [/login 頁面改版](../specs/02-auth-session.md#登入頁-ui-設計v1)）
 
+> 增補（2026-06-30）：依「未來新元件按需複製」原則落地兩個 v1 範圍外 primitive，兌現 §強制要求 5「focus / portal / keyboard 元件一律 Radix」：
+>
+> - `dropdown-menu.tsx`（Radix `@radix-ui/react-dropdown-menu`）——通用 action menu；行為由 `dropdown-menu.test.tsx` 鎖定（開啟 / 外部點擊收回 / Esc 收回 / 選取回呼）。
+> - `popover.tsx`（Radix `@radix-ui/react-popover`，`modal={false}`）——浮層面板；用於把自寫的 [`10 §4.4`](../specs/10-screen-topup-list.md) `MultiSelect`（原僅處理 Esc、缺「外部點擊收回」且違反 §強制要求 5）遷至 Radix dismissable layer，補齊外部點擊 / Esc 收回 / 還焦；行為由 `multi-select.test.tsx` 鎖定。
+
 ## 背景
 
 v0 的 `/login` 頁面以 inline style 撰寫；spec 01–11 撰寫期間未明文約定全專案的 styling stack。當開始實作 CMS 頁面（[`08`](../specs/08-screen-player-search.md) / [`09`](../specs/09-screen-player-detail.md) / [`10`](../specs/10-screen-topup-list.md) / [`11`](../specs/11-screen-topup-detail.md)）時，必須先敲定一個專案級 styling 系統，否則：
@@ -78,10 +83,12 @@ src/components/ui/
 ├── input.tsx
 ├── label.tsx
 ├── card.tsx
-└── alert.tsx                                       # v1 已建立的 5 個 shadcn primitive
+├── alert.tsx                                       # v1 已建立的 5 個 shadcn primitive
+├── dropdown-menu.tsx                               # v1.1 增補（2026-06-30，Radix dropdown-menu）
+└── popover.tsx                                     # v1.1 增補（2026-06-30，Radix popover）
 ```
 
-未來新元件（v1 範圍外）：Dialog / DropdownMenu / Select / Combobox / Table / Toast / Tooltip / Tabs 等，**按需從 shadcn 官方原始碼複製進 `src/components/ui/`**；不裝 shadcn CLI（避免拉入無關元件）。
+未來新元件（v1 範圍外）：Dialog / Select / Combobox / Table / Toast / Tooltip / Tabs 等，**按需從 shadcn 官方原始碼複製進 `src/components/ui/`**；不裝 shadcn CLI（避免拉入無關元件）。其中 **DropdownMenu、Popover 已於 2026-06-30 落地**（見上方狀態增補）。
 
 ### 強制要求
 
@@ -114,6 +121,12 @@ src/components/ui/
 | `src/lib/utils.ts` | 新增 `cn()` helper |
 | `src/components/ui/{button,input,label,card,alert}.tsx` | 新增（v1 5 個 shadcn primitive）；`button` base class 含 `cursor-pointer`（強制要求 9） |
 | `src/components/ui/button.test.tsx` | 鎖定 `cursor-pointer` 慣例（強制要求 9） |
+| `package.json` | v1.1：+2 deps `@radix-ui/react-dropdown-menu`、`@radix-ui/react-popover` |
+| `src/components/ui/dropdown-menu.tsx` | v1.1 新增（Radix dropdown-menu，data-slot 風格；強制要求 5） |
+| `src/components/ui/dropdown-menu.test.tsx` | v1.1 新增；鎖定外部點擊 / Esc 收回 / 選取回呼 |
+| `src/components/ui/popover.tsx` | v1.1 新增（Radix popover，`modal={false}`；強制要求 5） |
+| `src/components/topups/multi-select.tsx` | v1.1 重構：自寫 listbox → Radix Popover；補齊外部點擊收回 |
+| `src/components/topups/multi-select.test.tsx` | v1.1 擴充：新增「外部點擊收回」測試 + jsdom pointer 墊片 |
 | `docs/specs/02-auth-session.md` §3.1 / §9 / §12 | 新增「登入頁 UI 設計」小節 + 測試清單擴充 + 本 ADR cross-ref |
 | `docs/specs/08–11`（screen specs） | Server / Client 切割描述不變；元件名稱沿用 shadcn 提供的 Card / Button / Input / Label / Alert / Dialog 等；UI tooling 段落隱含採本 ADR |
 
