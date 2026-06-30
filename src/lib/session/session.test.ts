@@ -351,6 +351,46 @@ describe('Session Module', () => {
       vi.doUnmock('@/lib/auth/refresh');
     });
 
+    it('should delete session and emit auth.config.invalid_client alert on 400 invalid_client refresh (spec §7)', async () => {
+      const { redis } = await import('@/lib/session/redis');
+      const { metric } = await import('@/lib/observability/metrics');
+      const { getValidAccessToken } = await import('./session');
+
+      const sid = 'e'.repeat(64);
+      const now = Date.now();
+      const sessionData = {
+        userId: 'user-1',
+        clientId: 'cms-web',
+        accessToken: 'old-access',
+        refreshToken: 'old-refresh',
+        expiresAt: now + 60_000,
+        absoluteExpiresAt: now + 3600_000,
+        createdAt: now,
+      };
+
+      vi.mocked(redis.get).mockResolvedValue(JSON.stringify(sessionData));
+      vi.mocked(redis.set).mockResolvedValue('OK');
+      vi.mocked(redis.del).mockResolvedValue(1);
+      (redis as unknown as { eval: ReturnType<typeof vi.fn> }).eval = vi.fn().mockResolvedValue(1);
+
+      class TokenRefreshError {
+        constructor(public backendError: string) {}
+      }
+      vi.doMock('@/lib/auth/refresh', () => ({
+        refreshTokens: vi.fn().mockRejectedValue(new TokenRefreshError('invalid_client')),
+        TokenRefreshError,
+        UpstreamError: class {},
+      }));
+
+      const result = await getValidAccessToken(sid);
+
+      expect(result).toBeNull();
+      expect(vi.mocked(metric)).toHaveBeenCalledWith('auth.config.invalid_client', 1);
+
+      vi.unstubAllGlobals();
+      vi.doUnmock('@/lib/auth/refresh');
+    });
+
     it('should revoke newly issued family when CAS aborts (refresh succeeded but session was deleted)', async () => {
       const { redis } = await import('@/lib/session/redis');
       const { getValidAccessToken } = await import('./session');

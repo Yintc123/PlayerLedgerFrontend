@@ -14,9 +14,12 @@ export async function POST(request: NextRequest) {
   try {
     // 解析 request body
     const body = await request.json();
-    const { username, password } = body;
+    // BFF 對 Browser 接受 `email` 作為 `username` 的 alias（後端僅認 `username`，spec §3.1/§8）；
+    // 兩者皆有時以 `username` 優先。
+    const { username, email, password } = body;
+    const resolvedUsername = username ?? email;
 
-    if (!username || !password) {
+    if (!resolvedUsername || !password) {
       return NextResponse.json(
         { error: 'invalid_input' },
         { status: 400, headers: { 'X-Request-ID': requestId } }
@@ -26,7 +29,7 @@ export async function POST(request: NextRequest) {
     // 執行登入邏輯（傳遞 incoming sid 觸發 session fixation 防護，§3.1 step 5）
     const incomingSid = request.cookies.get(SESSION_COOKIE_NAME)?.value;
     const { userId, sessionId, absoluteExpiresAt } = await login(
-      { username, password },
+      { username: resolvedUsername, password },
       incomingSid
     );
 

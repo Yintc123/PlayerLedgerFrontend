@@ -10,7 +10,7 @@
 > - 儲值紀錄為**扁平資源** `/api/cms/deposit-records`（+ `/{id}`），**不**巢狀於 `/players/{id}/...`。
 > - 分頁改為 **OFFSET**（`page` / `page_size` + `meta.total`），不再是 cursor。
 > - 狀態 enum 用 `completed`（不是 `success`）。
-> - 後端**已定案**玩家儲值彙總端點（§7，2026-06-30；契約見後端 `players-deposit-summary-api.md`）；**仍無**匯出（CSV/export）端點——見 §8。
+> - 後端**已實作**玩家儲值彙總端點（§7，handler/service/repository 已上線；契約見後端 `players-deposit-summary-api.md`），前端 `getPlayerTopupSummary` **已串接真後端**；**仍無**匯出（CSV/export）端點——見 §8。
 
 範圍：
 
@@ -19,7 +19,7 @@
 - 建立（POST）與更新狀態／備註（PATCH）
 - 排序與分頁
 - 單筆明細
-- 玩家層級彙總統計（§7，**契約已定案**，後端實作排程中）
+- 玩家層級彙總統計（§7，**後端已實作並串接**）
 - 匯出 CSV（§8，**後端尚無端點**）
 - TDD 測試清單
 
@@ -148,7 +148,7 @@ components:
 >
 > **玩家搜尋 / 詳情已串接真後端**：後端 OpenAPI 已提供 `GET /cms/players`（[`08`](./08-screen-player-search.md)）與 `GET /cms/players/{id}`（[`09`](./09-screen-player-detail.md)），對應 `PlayerDTO` / `PlayerSearchResult` schema。`searchPlayers`（`src/lib/players/search.ts`）與 `getPlayer`（`src/lib/players/get.ts`）已改為經 `cmsRequest` 呼叫真後端，契約見 [`05`](./05-player-query-domain.md)。
 >
-> **契約已定、待串接**：`getPlayerTopupSummary`（玩家儲值彙總，見 §7）—— 後端已定案 `GET /api/cms/players/{id}/deposit-summary`（OpenAPI 已定義，handler 待後端實作）。`src/lib/topups/summary.ts` 應由 `mockSummaryFor` 改為 `cmsRequest`（§7.5）；後端端點上線前，本函式仍暫走 mock（`errorTriggerFor` 觸發字串僅在 mock 期間適用，串接後移除）。
+> **已串接真後端**：`getPlayerTopupSummary`（玩家儲值彙總，見 §7）—— 後端 `GET /api/cms/players/{id}/deposit-summary` handler 已實作；`src/lib/topups/summary.ts` 已由 `mockSummaryFor` 改為 `cmsRequest('/cms/players/{id}/deposit-summary')`（§7.5），mock（`MOCK_SUMMARY_BY_PLAYER` / `mockSummaryFor`）與 summary 的 `errorTriggerFor` 路徑已移除。
 
 ### 3.1 端點
 
@@ -348,13 +348,13 @@ PATCH /api/cms/deposit-records/{id}    # 權限：admin only
 
 ## 7. 玩家儲值彙總
 
-> **後端契約已定案（2026-06-30）**：後端新增端點 `GET /api/cms/players/{id}/deposit-summary`
-> （見後端 `schema/openapi.yaml` 與 `docs/specs/players-deposit-summary-api.md`）。
-> 本節形狀**已對齊後端 OpenAPI**，不再是前端推測。
+> **後端已實作並串接（2026-06-30）**：後端端點 `GET /api/cms/players/{id}/deposit-summary`
+> 已上線（handler / service / repository 已實作；見後端 `schema/openapi.yaml` 與
+> `docs/specs/players-deposit-summary-api.md`）。本節形狀**已對齊後端 OpenAPI**，不再是前端推測。
 >
-> **前端處置**：螢幕 09（[`09`](./09-screen-player-detail.md)）的「儲值彙總卡」由 mock **抽換為真實串接**
-> （`getPlayerTopupSummary` → `cmsRequest('/cms/players/{id}/deposit-summary')`）。
-> **後端實作排程中**：契約已定、handler / service 待後端實作；前端 BFF 可先依此契約完成，待後端上線即通。
+> **前端處置**：螢幕 09（[`09`](./09-screen-player-detail.md)）的「儲值彙總卡」已由 mock **抽換為真實串接**
+> （`getPlayerTopupSummary` → `cmsRequest('/cms/players/{id}/deposit-summary')`）；前端 OpenAPI
+> （`src/schema/openapi.yaml`）已補上 `PlayerDepositSummary` / `CurrencyTotals` 與該路徑。
 
 ### 7.1 端點
 
@@ -388,8 +388,9 @@ type TopupSummary = {
 }
 ```
 
-> **⚠️ 命名對齊**：現有 mock 型別（`src/lib/topups/types.ts`）用 `successCount` / `successAmount`，
-> 與後端 enum 值 `completed` 不一致。串接時**改名為 `completedCount` / `completedAmount`**（並同步 mock 與 card 元件）。
+> **命名對齊（已完成）**：型別（`src/lib/topups/types.ts`）已由先前 mock 的 `successCount` / `successAmount`
+> **改名為 `completedCount` / `completedAmount`**，對齊後端 enum 值 `completed`；card 元件（成功總額/成功筆數）
+> 與測試 fixture 一併同步。
 
 ### 7.3 聚合語意（後端定義，前端不重算）
 
@@ -413,8 +414,8 @@ type TopupSummary = {
 src/lib/topups/summary.ts   # getPlayerTopupSummary(playerId): Promise<TopupSummary>
 ```
 
-- 串接後改為 `cmsRequest('/cms/players/${playerId}/deposit-summary')`：session 取 token → `apiFetch` → 解 envelope `{data}`（無 meta）→ `transform` snake→camel → 非 2xx 映射 `ApiError`。
-- **後端 handler 上線前**：`summary.ts` 暫保留 `mockSummaryFor`（與 `list` / `get` / `create` 已串真後端**不同**——summary 端點 OpenAPI 已定義但尚未實作）；端點上線後再移除 mock 與 `errorTriggerFor` 路徑。
+- **已串接真後端**：`summary.ts` 呼叫 `cmsRequest('/cms/players/${playerId}/deposit-summary')`：session 取 token → `apiFetch` → 解 envelope `{data}`（無 meta）→ `transform.ts` 的 `toTopupSummary` snake→camel → 非 2xx 映射 `ApiError`。
+- mock（`MOCK_SUMMARY_BY_PLAYER` / `mockSummaryFor`）與 summary 專用的 `errorTriggerFor` 路徑已移除；錯誤態改由真後端回應（404/403/429…）驅動，螢幕 09 §5 部分失敗已涵蓋顯示。
 
 ---
 
@@ -568,15 +569,28 @@ it('should NOT include internalNote / operatorId / operatorIp columns')
 it('should return only the header row (plus BOM) when records is empty')
 ```
 
+### 11.8 `src/lib/topups/summary.test.ts`
+
+> 玩家儲值彙總資料層（`getPlayerTopupSummary` → `cmsRequest` + `toTopupSummary` transform）。
+
+```ts
+it('should request /cms/players/{id}/deposit-summary with the player id in the path')
+it('should transform snake_case totals to camelCase (completedCount, completedAmount)')
+it('should map first_topup_at / last_topup_at / lifetime_days to camelCase')
+it('should pass through null first/last/lifetime when player has no successful topups')
+it('should default totalsByCurrency to [] when data omits the array')
+it('should propagate ApiError (e.g. 404) from upstream')
+```
+
 ---
 
 ## 12. 開放問題
 
 > 實作前須與後端／PM 對齊：
 
-- [x] **儲值彙總端點**：~~後端目前無 summary 端點~~ — 後端已定案 `GET /api/cms/players/{id}/deposit-summary`（§7，2026-06-30；契約見後端 `players-deposit-summary-api.md`）。形狀、退款率（金額比）、生涯天數（首末次之間）已定；**後端 handler 實作排程中**，BFF 可先串。
+- [x] **儲值彙總端點**：~~後端目前無 summary 端點~~ / ~~後端 handler 實作排程中~~ — 後端 `GET /api/cms/players/{id}/deposit-summary` **已實作並上線**（§7；契約見後端 `players-deposit-summary-api.md`）。前端 `getPlayerTopupSummary` 已串接真後端、OpenAPI 已補 schema、型別由 `success*` 改名 `completed*`。形狀、退款率（金額比）、生涯天數（首末次之間）已定。
 - [ ] **匯出端點**：後端目前無 CSV / export 端點；§8 已移除前端匯出功能。待後端提供後再設計
-- [x] **玩家搜尋 / 詳情端點**：~~後端目前無玩家搜尋／詳情端點~~ — 後端已於 2026-06 提供 `GET /cms/players` 與 `GET /cms/players/{id}`（OpenAPI line 487 / 521）；`searchPlayers` / `getPlayer` 已串接真後端，契約見 [`05`](./05-player-query-domain.md) / [`08`](./08-screen-player-search.md) / [`09`](./09-screen-player-detail.md)。`getPlayerTopupSummary`（§7 玩家儲值彙總）契約亦已定案（`GET /cms/players/{id}/deposit-summary`），後端 handler 實作排程中
+- [x] **玩家搜尋 / 詳情端點**：~~後端目前無玩家搜尋／詳情端點~~ — 後端已於 2026-06 提供 `GET /cms/players` 與 `GET /cms/players/{id}`（OpenAPI line 487 / 521）；`searchPlayers` / `getPlayer` 已串接真後端，契約見 [`05`](./05-player-query-domain.md) / [`08`](./08-screen-player-search.md) / [`09`](./09-screen-player-detail.md)。`getPlayerTopupSummary`（§7 玩家儲值彙總，`GET /cms/players/{id}/deposit-summary`）後端 handler 已實作，前端亦已串接真後端
 - [ ] **多幣別**：後端 DB CHECK 目前僅允許 `TWD`；開放 USD / JPY 時需同步更新 §2.1 最小單位顯示規則
 - [ ] `paymentMethod` enum 顯示名稱對照表（「銀行轉帳」/「信用卡」…）放哪？建議 `lib/topups/labels.ts` 並與 i18n 整合
 - [ ] 退款是否區分部分／全額？後端目前僅有 `completed → refunded` 單一轉換，無退款金額欄位

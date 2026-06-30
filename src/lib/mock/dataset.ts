@@ -10,7 +10,7 @@
  */
 import { ApiError } from '@/lib/api/errors';
 import type { Player } from '@/lib/players/types';
-import type { DepositRecord, TopupSummary } from '@/lib/topups/types';
+import type { DepositRecord } from '@/lib/topups/types';
 
 export const MOCK_PLAYERS: Player[] = [
   {
@@ -203,59 +203,12 @@ export const MOCK_TOPUPS_BY_PLAYER: Record<string, DepositRecord[]> = {
 /** 全部儲值紀錄（供 /cms/deposit-records 無 player 篩選的列表）。 */
 export const MOCK_ALL_DEPOSITS: DepositRecord[] = Object.values(MOCK_TOPUPS_BY_PLAYER).flat();
 
-export const MOCK_SUMMARY_BY_PLAYER: Record<string, TopupSummary> = {
-  [MOCK_PLAYERS[0].playerId]: {
-    playerId: MOCK_PLAYERS[0].playerId,
-    totalsByCurrency: [
-      {
-        currency: 'TWD',
-        successCount: 2,
-        successAmount: 3000, // TWD 元
-        refundedCount: 1,
-        refundedAmount: 990,
-        failedCount: 1,
-        refundRate: 0.33, // > 0.3 → 觸發警示 tag（demo）
-      },
-    ],
-    firstTopupAt: '2026-05-30T11:20:18Z',
-    lastTopupAt: '2026-06-25T14:00:32Z',
-    lifetimeDays: 26,
-  },
-  [MOCK_PLAYERS[3].playerId]: {
-    playerId: MOCK_PLAYERS[3].playerId,
-    totalsByCurrency: [
-      {
-        currency: 'USD',
-        successCount: 2,
-        successAmount: 60050, // USD cents
-        refundedCount: 0,
-        refundedAmount: 0,
-        failedCount: 0,
-        refundRate: 0,
-      },
-    ],
-    firstTopupAt: '2026-06-15T18:04:00Z',
-    lastTopupAt: '2026-06-28T20:03:00Z',
-    lifetimeDays: 13,
-  },
-};
+// 玩家儲值彙總已串接真後端（GET /api/cms/players/{id}/deposit-summary，spec 06 §7），
+// 不再使用 mock；此處僅保留儲值紀錄列表 mock（後端列表端點亦已串接，保留供本機 demo）。
 
 /** 依玩家取 mock 紀錄；未定義者回空陣列。 */
 export function mockTopupsFor(playerId: string): DepositRecord[] {
   return MOCK_TOPUPS_BY_PLAYER[playerId] ?? [];
-}
-
-/** 依玩家取 mock 彙總；未定義者回空彙總（尚未儲值）。 */
-export function mockSummaryFor(playerId: string): TopupSummary {
-  return (
-    MOCK_SUMMARY_BY_PLAYER[playerId] ?? {
-      playerId,
-      totalsByCurrency: [],
-      firstTopupAt: null,
-      lastTopupAt: null,
-      lifetimeDays: null,
-    }
-  );
 }
 
 /** 依任一字串觸發錯誤態（手動 demo 用）；無觸發回 null。 */

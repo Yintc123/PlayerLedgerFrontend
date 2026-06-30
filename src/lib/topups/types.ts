@@ -66,17 +66,18 @@ export type CreateDepositInput = {
 };
 
 // ---------------------------------------------------------------------------
-// 玩家儲值彙總（TopupSummary）：後端尚無對應端點，螢幕 09 暫以 mock 呈現。
-// 待後端新增 summary 端點後再對齊（見 spec 06 §7 / spec 09）。
+// 玩家儲值彙總（TopupSummary）：對齊後端 GET /api/cms/players/{id}/deposit-summary
+// （OpenAPI PlayerDepositSummary / CurrencyTotals）。欄位名用後端 enum 值 `completed`
+// （非 `success`），由 transform 層自 snake_case 轉換（見 spec 06 §7）。
 // ---------------------------------------------------------------------------
 export type CurrencyTotals = {
   currency: string;
-  successCount: number;
-  successAmount: number;
+  completedCount: number; // status=completed 筆數
+  completedAmount: number; // status=completed 金額加總（幣別最小單位整數）
   refundedCount: number;
   refundedAmount: number;
   failedCount: number;
-  refundRate: number;
+  refundRate: number; // 後端算好（0..1），金額比，前端不重算
 };
 
 export type TopupSummary = {

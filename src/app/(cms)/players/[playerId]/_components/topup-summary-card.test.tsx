@@ -9,8 +9,8 @@ import type { CurrencyTotals, TopupSummary } from '@/lib/topups/types';
 function totals(over: Partial<CurrencyTotals> = {}): CurrencyTotals {
   return {
     currency: 'TWD',
-    successCount: 2,
-    successAmount: 69900,
+    completedCount: 2,
+    completedAmount: 69900,
     refundedCount: 1,
     refundedAmount: 99000,
     failedCount: 1,
@@ -52,7 +52,9 @@ describe('TopupSummaryCard', () => {
   it('should format amount using Intl.NumberFormat with currency-specific minor unit', () => {
     render(
       <TopupSummaryCard
-        summary={summary({ totalsByCurrency: [totals({ successAmount: 69900, currency: 'TWD' })] })}
+        summary={summary({
+          totalsByCurrency: [totals({ completedAmount: 69900, currency: 'TWD' })],
+        })}
       />
     );
     // 後端對 TWD 的最小單位為「元」（0 位小數）→ 69900 顯示為 69,900（非 699.00）

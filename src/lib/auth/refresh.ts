@@ -71,6 +71,18 @@ export async function refreshTokens(refreshToken: string): Promise<TokenPair> {
       throw new TokenRefreshError(errorCode, `Backend returned 401: ${errorCode}`);
     }
 
+    // 失敗情況 1.5：400 invalid_client（CLIENT_ID 政策被改 / 環境變數錯設）→ **終態**。
+    // 與 5xx 不同：session 無法靠重試救回，呼叫端應刪 session + 告警（spec §7）。
+    // 故拋 TokenRefreshError（同 401 路徑刪 session），而非 UpstreamError（保留 session）。
+    if (response.status === 400) {
+      const errorCode = body.error || 'invalid_client';
+      logger.error(
+        { type: 'auth.token.refresh.invalid_client', backendError: errorCode, requestId },
+        'Token refresh failed: invalid_client (config error)'
+      );
+      throw new TokenRefreshError(errorCode, `Backend returned 400: ${errorCode}`);
+    }
+
     // 失敗情況 2：5xx
     if (!response.ok) {
       logger.error(

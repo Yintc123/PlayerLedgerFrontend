@@ -49,8 +49,8 @@ const summary: TopupSummary = {
   totalsByCurrency: [
     {
       currency: 'TWD',
-      successCount: 2,
-      successAmount: 69900,
+      completedCount: 2,
+      completedAmount: 69900,
       refundedCount: 0,
       refundedAmount: 0,
       failedCount: 0,

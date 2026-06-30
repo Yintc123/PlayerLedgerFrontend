@@ -3,9 +3,9 @@
 > **對齊後端（2026-06-30）**：本頁三個區塊的後端契約皆已定案。
 > - 「基本資料卡」：`getPlayer` → `cmsRequest('/cms/players/{id}')`（[`05`](./05-player-query-domain.md) 已對齊）。
 > - 「最近紀錄」：扁平 `GET /api/cms/deposit-records?player_id=<id>`（[`06`](./06-topup-records-domain.md)）。
-> - **「儲值彙總卡」：後端已定案 `GET /api/cms/players/{id}/deposit-summary`**（[`06 §7`](./06-topup-records-domain.md)，
->   契約見後端 `players-deposit-summary-api.md`）。`getPlayerTopupSummary` 由 mock 改串真後端；
->   **後端 handler 實作排程中**，端點上線前該卡暫顯 mock / 載入失敗態（§5 部分失敗已涵蓋）。
+> - **「儲值彙總卡」：後端已實作 `GET /api/cms/players/{id}/deposit-summary`**（[`06 §7`](./06-topup-records-domain.md)，
+>   契約見後端 `players-deposit-summary-api.md`）。`getPlayerTopupSummary` 已由 mock 改串真後端；
+>   錯誤態由真後端回應（404/403/429…）驅動，載入失敗時顯示 §5 部分失敗區塊。
 > 注意 `last_active_at` 本期恆為 `null`、`status` 本期恆為 `active`，UI 須能處理。
 
 ## 1. 概覽
