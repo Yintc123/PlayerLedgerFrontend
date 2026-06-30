@@ -44,4 +44,13 @@ describe('CreateDepositForm', () => {
     expect(screen.getByText('請選擇支付方式')).toBeInTheDocument();
     expect(action).not.toHaveBeenCalled();
   });
+
+  it('should dispatch the action when amount and payment method are valid', async () => {
+    const user = userEvent.setup();
+    render(<CreateDepositForm playerId="p1" action={action} />);
+    await user.type(screen.getByLabelText(/金額/), '1000');
+    await user.selectOptions(screen.getByLabelText('支付方式'), 'credit_card');
+    await user.click(screen.getByRole('button', { name: '建立' }));
+    expect(action).toHaveBeenCalledTimes(1);
+  });
 });

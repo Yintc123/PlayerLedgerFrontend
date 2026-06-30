@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useState, type FormEvent } from 'react';
+import { startTransition, useActionState, useState, type FormEvent } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -11,7 +11,7 @@ export type CreateDepositState = { error?: string };
 const INITIAL: CreateDepositState = {};
 
 /**
- * 建立儲值表單（spec 10 §3 / deposit-records-api §4.1）。
+ * 建立儲值表單（spec 10 §12.9 測試清單 / deposit-records-api §4.1）。
  *
  * Client Component：提交前做基本驗證（amount 為正整數、payment_method 必填），
  * 通過後交由父層傳入的 Server Action 實際建立並導頁。Server Action 回傳之錯誤
@@ -48,7 +48,9 @@ export function CreateDepositForm({
     } else {
       setMethodError(null);
     }
-    if (ok) submitAction(data);
+    // useActionState 的 dispatch 必須在 transition 內呼叫，否則 React 會警告
+    // 且 isPending 不會正確更新。
+    if (ok) startTransition(() => submitAction(data));
   };
 
   return (

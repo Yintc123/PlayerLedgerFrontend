@@ -53,7 +53,10 @@ src/app/(cms)/players/[playerId]/topups/
 ├── page.test.tsx
 ├── error.tsx                      # 5xx
 ├── new/
-│   └── page.tsx                   # 建立儲值表單（POST /api/cms/deposit-records）
+│   ├── page.tsx                   # 建立儲值頁（Server Component；定義 Server Action）
+│   └── _components/
+│       ├── create-form.tsx        # 建立儲值表單（Client；客端驗證 + dispatch Server Action）
+│       └── create-form.test.tsx
 └── _components/
     ├── filter-bar.tsx             # 篩選列（Client）
     ├── filter-bar.test.tsx
@@ -409,7 +412,19 @@ it('should generate a CSV blob download from the provided records on click')
 
 > CSV 產生純函式 `toDepositCsv` 的測試（BOM / 表頭 / 跳脫 / 金額整數原值 / 不含敏感欄）見 [`06 §11.7`](./06-topup-records-domain.md)。
 
-### 12.9 `page.test.tsx`（整合）
+### 12.9 `new/_components/create-form.test.tsx`（建立儲值表單）
+
+> 客端表單：提交前做基本驗證（amount 為 ≥1 整數、payment_method 必填），通過後派發父層 Server Action。驗證測試使用者行為，不涉及 dispatch 機制細節。
+
+```ts
+it('should render amount, currency (default TWD), payment method, and optional fields')
+it('should render every payment method option from the contract')
+it('should show a validation error and NOT submit when amount is missing')
+it('should show a validation error when no payment method is chosen')
+it('should dispatch the action when amount and payment method are valid')
+```
+
+### 12.10 `page.test.tsx`（整合）
 
 > **測試模式**：async Server Component 的資料分支抽為內層 async 元件 `TopupsResult` 並 export，測試直接 `await` 後 render 該元件（RTL 無法解析巢狀 RSC）。
 
@@ -426,7 +441,7 @@ it('should render forbidden ErrorState on 403')
 it('should emit topups.list.result_count metric on render')
 ```
 
-### 12.9 E2E（Playwright）
+### 12.11 E2E（Playwright）
 
 ```ts
 test('filter by date range + status (repeated keys) returns matching records and URL reflects state')
