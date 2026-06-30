@@ -1,9 +1,11 @@
 # 玩家詳情頁規格書
 
-> **部分對齊後端（2026-06-29）**：後端已提供 `GET /api/cms/players/{id}`，本頁「基本資料卡」可由 mock
-> **抽換為真實串接**（`getPlayer` → `cmsRequest('/cms/players/{id}')`，見 [`05`](./05-player-query-domain.md) 已對齊規格）。
-> 「最近紀錄」區塊打扁平 `GET /api/cms/deposit-records?player_id=<id>`（[`06`](./06-topup-records-domain.md)）。
-> **「儲值彙總卡」仍無後端端點 → 維持 mock**（`getPlayerTopupSummary`，見 [`06 §7`](./06-topup-records-domain.md)）。
+> **對齊後端（2026-06-30）**：本頁三個區塊的後端契約皆已定案。
+> - 「基本資料卡」：`getPlayer` → `cmsRequest('/cms/players/{id}')`（[`05`](./05-player-query-domain.md) 已對齊）。
+> - 「最近紀錄」：扁平 `GET /api/cms/deposit-records?player_id=<id>`（[`06`](./06-topup-records-domain.md)）。
+> - **「儲值彙總卡」：後端已定案 `GET /api/cms/players/{id}/deposit-summary`**（[`06 §7`](./06-topup-records-domain.md)，
+>   契約見後端 `players-deposit-summary-api.md`）。`getPlayerTopupSummary` 由 mock 改串真後端；
+>   **後端 handler 實作排程中**，端點上線前該卡暫顯 mock / 載入失敗態（§5 部分失敗已涵蓋）。
 > 注意 `last_active_at` 本期恆為 `null`、`status` 本期恆為 `active`，UI 須能處理。
 
 ## 1. 概覽
@@ -146,7 +148,7 @@ src/app/(cms)/players/[playerId]/
 
 **退款率顯示**：
 
-- `refundRate` 由後端回傳（[`06 §7.2`](./06-topup-records-domain.md)），前端不在 client 算除法
+- `refundRate` 由後端回傳（金額比，[`06 §7.3`](./06-topup-records-domain.md)），前端不在 client 算除法
 - 顯示為百分比（`(refundRate * 100).toFixed(2) + '%'`）；`refundRate === 0` 時顯示「0%」而非「—」
 - `> 30%` 時 tag 用警示色（業務認定為異常）；門檻寫進 `_lib/thresholds.ts`，便於 PM 調整
 

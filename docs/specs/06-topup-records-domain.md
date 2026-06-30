@@ -10,7 +10,7 @@
 > - 儲值紀錄為**扁平資源** `/api/cms/deposit-records`（+ `/{id}`），**不**巢狀於 `/players/{id}/...`。
 > - 分頁改為 **OFFSET**（`page` / `page_size` + `meta.total`），不再是 cursor。
 > - 狀態 enum 用 `completed`（不是 `success`）。
-> - 後端**目前無**玩家儲值彙總（summary）與匯出（CSV/export）端點——見 §7、§8。
+> - 後端**已定案**玩家儲值彙總端點（§7，2026-06-30；契約見後端 `players-deposit-summary-api.md`）；**仍無**匯出（CSV/export）端點——見 §8。
 
 範圍：
 
@@ -19,7 +19,7 @@
 - 建立（POST）與更新狀態／備註（PATCH）
 - 排序與分頁
 - 單筆明細
-- 玩家層級彙總統計（§7，**後端尚無端點**）
+- 玩家層級彙總統計（§7，**契約已定案**，後端實作排程中）
 - 匯出 CSV（§8，**後端尚無端點**）
 - TDD 測試清單
 
@@ -146,7 +146,9 @@ components:
 
 > **實作現況（2026-06，已串接真後端）**：`lib/topups/{list,get,create}.ts` 已改為**呼叫真後端** `/api/cms/deposit-records*`（經 `@/lib/api-client/cms` 的 `cmsRequest`：從 session 取 access token → `apiFetch` → 解 envelope `{data,meta}` → `transform.ts` snake→camel → 非 2xx 映射 `ApiError`，429 帶 Retry-After）。需後端在線 + 有效登入 session。`updateDeposit` 尚未實作（無呼叫端）。
 >
-> **仍為 mock（後端無對應端點）**：`searchPlayers`（[`08`](./08-screen-player-search.md)）、`getPlayer`（[`09`](./09-screen-player-detail.md)）、`getPlayerTopupSummary` —— 後端 OpenAPI 無玩家搜尋/詳情/彙總端點（僅有 `members` 表供 deposit-records join），故維持 `src/lib/mock/dataset.ts`，待後端補端點後再串。錯誤觸發字串（`forbidden`/`notfound`/...）僅這些 mock 函式仍適用。
+> **玩家搜尋 / 詳情已串接真後端**：後端 OpenAPI 已提供 `GET /cms/players`（[`08`](./08-screen-player-search.md)）與 `GET /cms/players/{id}`（[`09`](./09-screen-player-detail.md)），對應 `PlayerDTO` / `PlayerSearchResult` schema。`searchPlayers`（`src/lib/players/search.ts`）與 `getPlayer`（`src/lib/players/get.ts`）已改為經 `cmsRequest` 呼叫真後端，契約見 [`05`](./05-player-query-domain.md)。
+>
+> **契約已定、待串接**：`getPlayerTopupSummary`（玩家儲值彙總，見 §7）—— 後端已定案 `GET /api/cms/players/{id}/deposit-summary`（OpenAPI 已定義，handler 待後端實作）。`src/lib/topups/summary.ts` 應由 `mockSummaryFor` 改為 `cmsRequest`（§7.5）；後端端點上線前，本函式仍暫走 mock（`errorTriggerFor` 觸發字串僅在 mock 期間適用，串接後移除）。
 
 ### 3.1 端點
 
@@ -346,33 +348,73 @@ PATCH /api/cms/deposit-records/{id}    # 權限：admin only
 
 ## 7. 玩家儲值彙總
 
-> **後端目前無此端點**：OpenAPI 未提供玩家儲值彙總（summary）端點。先前的 `GET /players/{id}/topups/summary`
-> 與 `TopupSummary` 形狀為前端推測，後端尚未實作。
+> **後端契約已定案（2026-06-30）**：後端新增端點 `GET /api/cms/players/{id}/deposit-summary`
+> （見後端 `schema/openapi.yaml` 與 `docs/specs/players-deposit-summary-api.md`）。
+> 本節形狀**已對齊後端 OpenAPI**，不再是前端推測。
 >
-> **前端處置**：螢幕 09（[`09`](./09-screen-player-detail.md)）的「儲值彙總卡」**暫以 mock 呈現**；標記為
-> **「待後端新增 summary 端點」**。需向後端要求新增 members 儲值彙總端點後，再回頭定案本節契約形狀
-> （`totalsByCurrency` / `refundRate` 等由後端決定，前端不在 client 算）。
+> **前端處置**：螢幕 09（[`09`](./09-screen-player-detail.md)）的「儲值彙總卡」由 mock **抽換為真實串接**
+> （`getPlayerTopupSummary` → `cmsRequest('/cms/players/{id}/deposit-summary')`）。
+> **後端實作排程中**：契約已定、handler / service 待後端實作；前端 BFF 可先依此契約完成，待後端上線即通。
 
-下方為**待後端確認**的建議形狀（非現行契約）：
+### 7.1 端點
+
+```
+GET /api/cms/players/{id}/deposit-summary          # 全 CMS staff（彙總無 PII，viewer 亦完整、不遮罩）
+```
+
+- 巢狀於 `players`（與 `GET /cms/players/{id}` 同範疇）；**非**掛在 `deposit-records` 下。
+- `id` 為玩家 UUID（= `members.id`）。唯讀；**非分頁，回應無 `meta`**。
+
+### 7.2 Response（後端 snake_case → BFF camelCase）
 
 ```ts
-// ⚠️ 待後端提供 summary 端點後定案；目前僅供 mock / UI 佔位參考
+// 已對齊後端 OpenAPI（schema/openapi.yaml: PlayerTopupSummary / CurrencyTotals）
+type CurrencyTotals = {
+  currency:        string   // ISO 4217；目前僅 TWD
+  completedCount:  number   // status=completed 筆數
+  completedAmount: number   // status=completed 金額加總（最小貨幣單位整數）
+  refundedCount:   number
+  refundedAmount:  number
+  failedCount:     number
+  refundRate:      number   // 後端算好（0..1），金額比，避免前端浮點誤差
+}
+
 type TopupSummary = {
-  playerId:            string
-  totalsByCurrency: Array<{
-    currency:          string
-    completedCount:    number        // 完成筆數
-    completedAmount:   number        // 完成總額（最小貨幣單位）
-    refundedCount:     number
-    refundedAmount:    number
-    failedCount:       number
-    refundRate:        number        // 後端算好，避免前端浮點誤差
-  }>
-  firstTopupAt:        string | null
-  lastTopupAt:         string | null
-  lifetimeDays:        number | null
+  playerId:         string
+  totalsByCurrency: CurrencyTotals[]   // 每幣別一筆，currency ASC；無 → []
+  firstTopupAt:     string | null      // RFC 3339 UTC；無成功紀錄 → null
+  lastTopupAt:      string | null
+  lifetimeDays:     number | null      // UTC 日曆日差 DATE(last)−DATE(first)；同日 → 0；無 → null
 }
 ```
+
+> **⚠️ 命名對齊**：現有 mock 型別（`src/lib/topups/types.ts`）用 `successCount` / `successAmount`，
+> 與後端 enum 值 `completed` 不一致。串接時**改名為 `completedCount` / `completedAmount`**（並同步 mock 與 card 元件）。
+
+### 7.3 聚合語意（後端定義，前端不重算）
+
+- `completed_*` / `refunded_*` / `failed_*` 依**當前 status** 分桶（互斥）；`pending` / `cancelled` 不計入。
+- `refundRate` = `refundedAmount / (completedAmount + refundedAmount)`；分母 0 → `0`（前端顯示「0%」而非「—」，見 [`09 §4.3`](./09-screen-player-detail.md)）。
+- `firstTopupAt` / `lastTopupAt` 取 completed ∪ refunded 紀錄的 `createdAt` 最小 / 最大。
+- `lifetimeDays` 為玩家層級（跨幣別合併）：UTC 日曆日差 `DATE(last) − DATE(first)`（同日 = 0）。
+
+### 7.4 錯誤
+
+| 條件 | HTTP | error |
+|------|------|-------|
+| `id` 非 UUID | 400 | `invalid input` |
+| 非 CMS staff | 403 | `forbidden` |
+| `player_id` 不存在於 members | 404 | `resource not found` |
+| 限流 | 429 | `too many requests`（`Retry-After`） |
+
+### 7.5 BFF 實作
+
+```
+src/lib/topups/summary.ts   # getPlayerTopupSummary(playerId): Promise<TopupSummary>
+```
+
+- 串接後改為 `cmsRequest('/cms/players/${playerId}/deposit-summary')`：session 取 token → `apiFetch` → 解 envelope `{data}`（無 meta）→ `transform` snake→camel → 非 2xx 映射 `ApiError`。
+- **後端 handler 上線前**：`summary.ts` 暫保留 `mockSummaryFor`（與 `list` / `get` / `create` 已串真後端**不同**——summary 端點 OpenAPI 已定義但尚未實作）；端點上線後再移除 mock 與 `errorTriggerFor` 路徑。
 
 ---
 
@@ -381,9 +423,13 @@ type TopupSummary = {
 > **後端目前無匯出端點**：OpenAPI 未提供任何 CSV / export 端點（同步或 async job 皆無）。
 > 先前 §8 的同步匯出、async job、`/exports/{job_id}` 等皆為前端推測設計，後端尚未實作。
 >
-> **前端處置**：**已移除匯出功能**——螢幕 10（[`10`](./10-screen-topup-list.md)）不再渲染匯出按鈕／Modal，
-> `lib/topups/export.ts` 不再是契約的一部分。標記為**「待後端提供匯出端點」**；屆時再回頭設計
-> 同步 vs async、CSV 欄位、稽核事件（`topups.export`）等。
+> **前端處置（2026-06-30）**：採**前端 client 端匯出**——螢幕 10（[`10`](./10-screen-topup-list.md)）的 `ExportButton`
+> 直接拿「當前篩選頁的列表 `data`」（一次 `GET /api/cms/deposit-records` 回應，≤ `page_size` 筆）在瀏覽器產
+> CSV（UTF-8 BOM），**不需後端端點**。產檔純函式 `src/lib/topups/export-csv.ts`（見 §11.7）。
+>
+> **範圍限制**：v1 僅匯出**當前頁**；「匯出全部符合篩選結果」（跨頁、可能上千筆）與**伺服器端稽核**
+> （`topups.export`）仍待後端專屬 export 端點，屆時再設計同步 vs async。權限／欄位遮罩見
+> [`07 §3.4`](./07-admin-rbac-audit.md) / [`07 §5`](./07-admin-rbac-audit.md)（viewer 隱藏匯出鈕為純 UX；後端對 viewer 遮罩敏感欄位為待辦）。
 
 ---
 
@@ -506,15 +552,31 @@ it('should propagate 403 forbidden when caller is not admin')
 - 角色行為矩陣 → [`07`](./07-admin-rbac-audit.md)
 - 玩家自助端點（`/api/me/deposit-records`）→ 玩家端 app，非本 CMS 規格
 
+### 11.7 `src/lib/topups/export-csv.test.ts`
+
+> 前端 client 端匯出的純函式：`DepositRecord[]` → CSV 字串（含 UTF-8 BOM）。匯出**螢幕可見欄位**：
+> `createdAt` / `playerName` / `referenceNo` / `amount`（整數原值）/ `currency` / `paymentMethod` / `status`。
+> **不含** `internalNote` / `operatorId` / `operatorIp`（§8 範圍限制 + [`07 §3.4`](./07-admin-rbac-audit.md) 緩解）。
+
+```ts
+it('should prepend a UTF-8 BOM (\\uFEFF) so Excel reads 中文 correctly')
+it('should emit a header row of visible columns (createdAt, playerName, referenceNo, amount, currency, paymentMethod, status)')
+it('should output amount as the raw integer minor-unit value (no Intl formatting)')
+it('should output referenceNo as empty cell when null')
+it('should escape comma / double-quote / newline by wrapping the cell in double-quotes and doubling inner quotes')
+it('should NOT include internalNote / operatorId / operatorIp columns')
+it('should return only the header row (plus BOM) when records is empty')
+```
+
 ---
 
 ## 12. 開放問題
 
 > 實作前須與後端／PM 對齊：
 
-- [ ] **儲值彙總端點**：後端目前無 summary 端點；§7 形狀為待定。需向後端要求新增 members 儲值彙總端點
+- [x] **儲值彙總端點**：~~後端目前無 summary 端點~~ — 後端已定案 `GET /api/cms/players/{id}/deposit-summary`（§7，2026-06-30；契約見後端 `players-deposit-summary-api.md`）。形狀、退款率（金額比）、生涯天數（首末次之間）已定；**後端 handler 實作排程中**，BFF 可先串。
 - [ ] **匯出端點**：後端目前無 CSV / export 端點；§8 已移除前端匯出功能。待後端提供後再設計
-- [ ] **玩家搜尋 / 詳情端點**：後端目前無玩家搜尋／詳情端點，玩家僅以 `player_id` 在 record 內引用；影響 [`05`](./05-player-query-domain.md) / [`08`](./08-screen-player-search.md) / [`09`](./09-screen-player-detail.md)
+- [x] **玩家搜尋 / 詳情端點**：~~後端目前無玩家搜尋／詳情端點~~ — 後端已於 2026-06 提供 `GET /cms/players` 與 `GET /cms/players/{id}`（OpenAPI line 487 / 521）；`searchPlayers` / `getPlayer` 已串接真後端，契約見 [`05`](./05-player-query-domain.md) / [`08`](./08-screen-player-search.md) / [`09`](./09-screen-player-detail.md)。`getPlayerTopupSummary`（§7 玩家儲值彙總）契約亦已定案（`GET /cms/players/{id}/deposit-summary`），後端 handler 實作排程中
 - [ ] **多幣別**：後端 DB CHECK 目前僅允許 `TWD`；開放 USD / JPY 時需同步更新 §2.1 最小單位顯示規則
 - [ ] `paymentMethod` enum 顯示名稱對照表（「銀行轉帳」/「信用卡」…）放哪？建議 `lib/topups/labels.ts` 並與 i18n 整合
 - [ ] 退款是否區分部分／全額？後端目前僅有 `completed → refunded` 單一轉換，無退款金額欄位
