@@ -4,28 +4,29 @@
 **測試狀態**: 371 unit tests passing · type-check ✅ · lint ✅
 **整體合規**: 🟡 **基礎建設層完成;玩家領域待後端 `/players/*` 端點**
 
-> 本文件為跨全部 13 份 spec 的**單一真實狀態來源**。先前版本只涵蓋 01–04 並聲稱「100% 完成」,
+> 本文件為跨全部 14 份 spec 的**單一真實狀態來源**。先前版本只涵蓋 01–04 並聲稱「100% 完成」,
 > 未提及 05–13——已修正為下方的逐 spec 狀態。
 
 ---
 
 ## 總覽
 
-| Spec | 主題               | 狀態        | 說明                                                                                     |
-| ---- | ------------------ | ----------- | ---------------------------------------------------------------------------------------- |
-| 01   | BFF 架構           | ✅ 完成     | proxy / health(含 route 測試)/ 安全標頭 / XFF append / rate limit                        |
-| 02   | 認證 Session       | ✅ 完成     | login / logout / refresh(mutex + CAS)/ cookie / client session                           |
-| 03   | 可觀測性           | ✅ 完成     | pino logger + redact / EMF metrics / OTel / 前端 telemetry 端點                          |
-| 04   | Dockerfile & Build | ✅ 完成     | 多階段建置 / standalone / 非 root / HEALTHCHECK                                          |
-| 05   | 玩家查詢領域       | ⛔ 待後端   | 依賴 `/players/search`、`/players/{id}`——**後端 OpenAPI 未提供**                         |
-| 06   | 儲值紀錄領域       | ⛔ 待後端   | 依賴 `/players/{id}/topups/*`、export——**後端 OpenAPI 未提供**                           |
-| 07   | Admin RBAC & Audit | 🟡 核心完成 | role decode + ClientSession.role + layout 注入完成;UI 閘門(ExportButton 等)待 05/06 畫面 |
-| 08   | 畫面:玩家搜尋      | ⛔ 待後端   | 依賴 spec 05                                                                             |
-| 09   | 畫面:玩家詳情      | ⛔ 待後端   | 依賴 spec 05                                                                             |
-| 10   | 畫面:儲值列表      | ⛔ 待後端   | 依賴 spec 06                                                                             |
-| 11   | 畫面:儲值詳情      | ⛔ 待後端   | 依賴 spec 06                                                                             |
-| 12   | 註冊領域           | ✅ 完成     | 路由 / CSRF / rate limit / 錯誤碼對應 / 驗證分工                                         |
-| 13   | 畫面:註冊          | ✅ 完成     | 表單 / 行為 / login 頁強化 / a11y(含 `aria-busy`)                                        |
+| Spec | 主題                | 狀態        | 說明                                                                                                          |
+| ---- | ------------------- | ----------- | ------------------------------------------------------------------------------------------------------------- |
+| 01   | BFF 架構            | ✅ 完成     | proxy / health(含 route 測試)/ 安全標頭 / XFF append / rate limit                                             |
+| 02   | 認證 Session        | ✅ 完成     | login / logout / refresh(mutex + CAS)/ cookie / client session                                                |
+| 03   | 可觀測性            | ✅ 完成     | pino logger + redact / EMF metrics / OTel / 前端 telemetry 端點                                               |
+| 04   | Dockerfile & Build  | ✅ 完成     | 多階段建置 / standalone / 非 root / HEALTHCHECK                                                               |
+| 05   | 玩家查詢領域        | ⛔ 待後端   | 依賴 `/players/search`、`/players/{id}`——**後端 OpenAPI 未提供**                                              |
+| 06   | 儲值紀錄領域        | ⛔ 待後端   | 依賴 `/players/{id}/topups/*`、export——**後端 OpenAPI 未提供**                                                |
+| 07   | Admin RBAC & Audit  | 🟡 核心完成 | role decode + ClientSession.role + layout 注入完成;UI 閘門(ExportButton 等)待 05/06 畫面                      |
+| 08   | 畫面:玩家搜尋       | ⛔ 待後端   | 依賴 spec 05                                                                                                  |
+| 09   | 畫面:玩家詳情       | ⛔ 待後端   | 依賴 spec 05                                                                                                  |
+| 10   | 畫面:儲值列表       | ⛔ 待後端   | 依賴 spec 06                                                                                                  |
+| 11   | 畫面:儲值詳情       | ⛔ 待後端   | 依賴 spec 06                                                                                                  |
+| 12   | 註冊領域            | ✅ 完成     | 路由 / CSRF / rate limit / 錯誤碼對應 / 驗證分工                                                              |
+| 13   | 畫面:註冊           | ✅ 完成     | 表單 / 行為 / login 頁強化 / a11y(含 `aria-busy`)                                                             |
+| 14   | 畫面:全玩家儲值紀錄 | ✅ 完成     | 跨玩家總覽;篩選 / 排序 / 分頁 / 玩家聚焦 + client 端 CSV 匯出(含玩家 ID);重用 `/cms/deposit-records` 扁平資源 |
 
 ---
 
@@ -84,6 +85,13 @@
 - `src/app/(auth)/register/page.tsx`(欄位 / 驗證分工 / 錯誤碼對應 / `aria-busy`)
 - login 頁 `?registered=true` banner 與註冊連結
 
+### Spec 14 — 畫面:全玩家儲值紀錄
+
+- `src/app/(cms)/deposit-records/page.tsx` 跨玩家列表(Server Component);`listDeposits` 重用 `/cms/deposit-records` 扁平資源(不帶 `player_id` → 全玩家)
+- `_components/`:`filter-bar` / `active-player-chip`(玩家聚焦,server-first)/ `result-table` / `result-row`(列內玩家聚焦連結)/ empty / error state
+- 共用元件提升:`@/components/topups/` 的 `pagination`(`basePath` 參數化)、`export-button`(`includePlayerId` prop)、`@/lib/topups/query-params`(擴可選 `playerId`)
+- client 端 CSV 匯出(§A4.1):`toDepositCsv(records, { includePlayerId })` 於「玩家」欄後加「玩家 ID」欄;僅當前頁、admin/user 可見
+
 ---
 
 ## 測試
@@ -97,4 +105,4 @@ npm run test:e2e     # Playwright
 
 ---
 
-**簽核**: Claude Code · **規格範圍**: 01–13 · **狀態**: 基礎建設完成,玩家領域待後端契約
+**簽核**: Claude Code · **規格範圍**: 01–14 · **狀態**: 基礎建設完成,玩家領域待後端契約
