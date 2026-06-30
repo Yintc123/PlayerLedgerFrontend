@@ -2,7 +2,7 @@ import { redis } from '@/lib/session/redis';
 import { config } from '@/lib/config';
 import { logger } from '@/lib/logger/logger';
 import { SESSION_COOKIE_NAME, getCookieOptions } from '@/lib/session/cookie';
-import { recordRefreshOutcome } from '@/lib/observability/metrics';
+import { recordRefreshOutcome, metric } from '@/lib/observability/metrics';
 
 export type SessionData = {
   userId: string;
@@ -229,8 +229,13 @@ export async function getValidAccessToken(sid: string | undefined): Promise<stri
       const { TokenRefreshError, UpstreamError } = await import('@/lib/auth/refresh');
 
       if (err instanceof TokenRefreshError) {
-        // 401: token 過期、abs_exp 過、重放偵測 → 刪除 session
+        // 401（token 過期 / abs_exp 過 / 重放偵測）或 400 invalid_client → 終態，刪除 session
         await deleteSession(sid);
+
+        // 400 invalid_client：CLIENT_ID 政策被改 / 環境變數錯設 → 告警 metric（spec §7）
+        if (err.backendError === 'invalid_client') {
+          metric('auth.config.invalid_client', 1);
+        }
         logger.error(
           {
             type: 'auth.token.refresh',
