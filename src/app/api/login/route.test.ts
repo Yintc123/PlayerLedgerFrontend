@@ -91,6 +91,41 @@ describe('POST /api/login response shape (spec 02 §1 + §8)', () => {
     expect(body).not.toHaveProperty('request_id');
   });
 
+  it('should map browser-supplied email to username when sending to backend (spec §3.1/§8)', async () => {
+    const { login } = await import('@/lib/auth/login');
+    const req = buildPost({ email: 'alice@example.com', password: 'pw1234567890' });
+    const res = await POST(req);
+
+    expect(res.status).toBe(200);
+    expect(vi.mocked(login)).toHaveBeenCalledWith(
+      expect.objectContaining({ username: 'alice@example.com', password: 'pw1234567890' }),
+      undefined
+    );
+  });
+
+  it('should prefer username over email when both are supplied', async () => {
+    const { login } = await import('@/lib/auth/login');
+    const req = buildPost({
+      username: 'alice',
+      email: 'alice@example.com',
+      password: 'pw1234567890',
+    });
+    await POST(req);
+
+    expect(vi.mocked(login)).toHaveBeenCalledWith(
+      expect.objectContaining({ username: 'alice' }),
+      undefined
+    );
+  });
+
+  it('should return 400 invalid_input when neither username nor email is supplied', async () => {
+    const req = buildPost({ password: 'pw1234567890' });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe('invalid_input');
+  });
+
   it('should set Retry-After header on 429 account_locked (spec §6.3)', async () => {
     const { login, LoginError } = await import('@/lib/auth/login');
     vi.mocked(login).mockRejectedValueOnce(
