@@ -66,7 +66,7 @@ export function Pagination({
   };
 
   const baseBtn =
-    'inline-flex h-9 min-w-9 items-center justify-center rounded-md border px-3 text-sm outline-none transition-colors focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:pointer-events-none disabled:opacity-50';
+    'inline-flex h-9 min-w-9 cursor-pointer items-center justify-center rounded-md border px-3 text-sm outline-none transition-colors focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:pointer-events-none disabled:opacity-50';
 
   return (
     <nav
