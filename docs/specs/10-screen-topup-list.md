@@ -71,8 +71,7 @@ src/app/(cms)/players/[playerId]/topups/
     ├── pagination.test.tsx
     ├── create-deposit-button.tsx  # 「建立儲值」入口（Client，依角色顯隱）
     ├── create-deposit-button.test.tsx
-    ├── export-button.tsx          # 「匯出 CSV」入口（Client，依角色顯隱；client 端產檔）
-    ├── export-button.test.tsx
+    # export-button 已提升至 @/components/topups/export-button.tsx（「匯出 CSV」入口，含 includePlayerId prop，與 spec 14 共用）
     ├── empty-state.tsx
     ├── empty-state.test.tsx
     └── error-state.tsx
@@ -398,13 +397,14 @@ it('should render when session.role is "admin"')
 it('should navigate to /players/[id]/topups/new when clicked')
 ```
 
-### 12.8 `_components/export-button.test.tsx`
+### 12.8 `@/components/topups/export-button.test.tsx`（已提升為共用）
 
 ```ts
 it('should NOT render when session.role is "viewer"')
 it('should render when session.role is "user"')
 it('should render when session.role is "admin"')
 it('should generate a CSV blob download from the provided records on click')
+// includePlayerId 案例（spec 14 A4.1）見 14 §B10.7
 ```
 
 > CSV 產生純函式 `toDepositCsv` 的測試（BOM / 表頭 / 跳脫 / 金額整數原值 / 不含敏感欄）見 [`06 §11.7`](./06-topup-records-domain.md)。

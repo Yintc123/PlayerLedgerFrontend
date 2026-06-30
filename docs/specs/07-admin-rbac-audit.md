@@ -356,7 +356,7 @@ it('should never include accessToken / refreshToken / sid in value')   // 同 sp
 ### 10.3 角色感知 UI（在各 screen test 中執行）
 
 ```ts
-// spec 10 _components/export-button.test.tsx（client 端匯出，角色顯隱）
+// @/components/topups/export-button.test.tsx（提升為共用；spec 10 / 14 共用，client 端匯出，角色顯隱）
 it('should render Export button when session.role is "admin"')
 it('should render Export button when session.role is "user"')
 it('should NOT render Export button when session.role is "viewer"')
