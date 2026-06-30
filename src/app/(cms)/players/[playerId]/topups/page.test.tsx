@@ -3,6 +3,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { ApiError } from '@/lib/api/errors';
+import { SessionProvider, type ClientSession } from '@/lib/session/client-session';
+import type { ReactNode } from 'react';
 import type { DepositRecord } from '@/lib/topups/types';
 
 const listDepositsMock = vi.fn();
@@ -44,6 +46,19 @@ function result(records: DepositRecord[], total = records.length) {
   return { records, page: 1, pageSize: 20, total };
 }
 
+// TopupsResult 在受保護的 (cms) 區段執行，實際上由 layout 提供 SessionProvider；
+// 測試時包一層（admin 角色，使 ExportButton 渲染）。
+const adminSession: ClientSession = {
+  userId: 'u1',
+  clientId: 'cms-web',
+  absoluteExpiresAt: 0,
+  createdAt: 0,
+  role: 'admin',
+};
+function renderResult(node: ReactNode) {
+  return render(<SessionProvider initialSession={adminSession}>{node}</SessionProvider>);
+}
+
 beforeEach(() => {
   listDepositsMock.mockReset();
   recordMetricMock.mockReset();
@@ -52,32 +67,32 @@ beforeEach(() => {
 describe('TopupsResult', () => {
   it('should call listDeposits with playerId merged into the parsed query', async () => {
     listDepositsMock.mockResolvedValue(result([]));
-    render(await TopupsResult({ playerId: 'p1', query: { status: ['pending'] } }));
+    renderResult(await TopupsResult({ playerId: 'p1', query: { status: ['pending'] } }));
     expect(listDepositsMock).toHaveBeenCalledWith({ playerId: 'p1', status: ['pending'] });
   });
 
   it('should render ResultTable when records.length > 0', async () => {
     listDepositsMock.mockResolvedValue(result([makeRecord('a'), makeRecord('b')]));
-    render(await TopupsResult({ playerId: 'p1', query: {} }));
+    renderResult(await TopupsResult({ playerId: 'p1', query: {} }));
     expect(screen.getByRole('table')).toBeInTheDocument();
     expect(screen.getAllByRole('row')).toHaveLength(3); // 2 資料列 + 1 表頭列
   });
 
   it('should render no-results EmptyState when records is empty', async () => {
     listDepositsMock.mockResolvedValue(result([]));
-    render(await TopupsResult({ playerId: 'p1', query: {} }));
+    renderResult(await TopupsResult({ playerId: 'p1', query: {} }));
     expect(screen.getByText('無符合條件的儲值紀錄')).toBeInTheDocument();
   });
 
   it('should render rate-limited ErrorState on 429', async () => {
     listDepositsMock.mockRejectedValue(new ApiError(429, 'too_many_requests', undefined, 5));
-    render(await TopupsResult({ playerId: 'p1', query: {} }));
+    renderResult(await TopupsResult({ playerId: 'p1', query: {} }));
     expect(screen.getByText('請求過於頻繁')).toBeInTheDocument();
   });
 
   it('should render forbidden ErrorState on 403', async () => {
     listDepositsMock.mockRejectedValue(new ApiError(403, 'forbidden'));
-    render(await TopupsResult({ playerId: 'p1', query: {} }));
+    renderResult(await TopupsResult({ playerId: 'p1', query: {} }));
     expect(screen.getByText('無權檢視儲值紀錄')).toBeInTheDocument();
   });
 
@@ -88,7 +103,7 @@ describe('TopupsResult', () => {
 
   it('should emit topups.list.result_count metric on render', async () => {
     listDepositsMock.mockResolvedValue(result([makeRecord('a')]));
-    render(await TopupsResult({ playerId: 'p1', query: {} }));
+    renderResult(await TopupsResult({ playerId: 'p1', query: {} }));
     expect(recordMetricMock).toHaveBeenCalledWith('topups.list.result_count', { count: 1 });
   });
 });

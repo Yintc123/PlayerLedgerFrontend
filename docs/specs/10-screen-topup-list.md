@@ -6,7 +6,7 @@ CMS 後台「玩家儲值紀錄列表頁」——從 [`09`](./09-screen-player-d
 
 > **後端契約已定案（2026-06）**：列表改打扁平資源 `GET /api/cms/deposit-records`（以 `?player_id=` 聚焦玩家），
 > **OFFSET 分頁**（`page` / `page_size` + `meta.total`），多值篩選用**重複 key**（`?status=pending&status=failed`）。
-> 後端**無匯出端點**——CSV 匯出功能已移除（見 [`06 §8`](./06-topup-records-domain.md)）；幣別／金額篩選後端不支援，已移除。
+> 後端**無匯出端點**——CSV 匯出改為**前端 client 端**從當前頁列表 `data` 產檔（UTF-8 BOM，見 [`06 §8`](./06-topup-records-domain.md) / §7.3）；幣別／金額篩選後端不支援，已移除。
 
 範圍：
 
@@ -69,14 +69,18 @@ src/app/(cms)/players/[playerId]/topups/
     ├── result-row.test.tsx
     # pagination 已提升至 @/components/topups/pagination.tsx（頁碼導航，與 spec 14 共用）
     ├── pagination.test.tsx
-    ├── create-button.tsx          # 「建立儲值」入口（Client，依角色顯隱）
-    ├── create-button.test.tsx
+    ├── create-deposit-button.tsx  # 「建立儲值」入口（Client，依角色顯隱）
+    ├── create-deposit-button.test.tsx
+    ├── export-button.tsx          # 「匯出 CSV」入口（Client，依角色顯隱；client 端產檔）
+    ├── export-button.test.tsx
     ├── empty-state.tsx
     ├── empty-state.test.tsx
     └── error-state.tsx
 └── _lib/
     ├── query-params.ts
     └── query-params.test.ts
+
+# CSV 產生純函式提升至 src/lib/topups/export-csv.ts（測試見 06 §11.7）
 ```
 
 ---
@@ -198,11 +202,11 @@ src/app/(cms)/players/[playerId]/topups/
 
 ---
 
-## 7. 建立儲值（`CreateButton`）
+## 7. 角色感知入口（`CreateDepositButton` / `ExportButton`）
 
-> 後端**無匯出端點**，原 CSV 匯出功能已移除（見 [`06 §8`](./06-topup-records-domain.md)）。本節改為「建立儲值」入口。
+> 兩顆按鈕都依 `session.role` 顯隱（純 UX，非安全邊界）。建立儲值經後端 POST；匯出為 client 端產檔（後端**無**匯出端點，見 [`06 §8`](./06-topup-records-domain.md)）。
 
-### 7.1 按鈕條件顯示
+### 7.1 建立儲值 — 按鈕條件顯示
 
 - `session.role === 'viewer'` 時**不**渲染；admin / user 顯示「建立儲值」按鈕（[`07 §4.1`](./07-admin-rbac-audit.md)：POST 限 admin / user）
 - 用 `useSession()` 取 `role`（單一字串，**非**陣列）；client component
@@ -216,6 +220,16 @@ src/app/(cms)/players/[playerId]/topups/
 - `status` 由後端固定為 `pending`，表單不提供；`playerName` / `operatorId` / `operatorIp` 由 server 填入
 
 > **建立表單詳細欄位驗證與錯誤態**（404 player 不存在、409 reference_no 重複）屬建立表單頁規格；本列表頁僅負責入口按鈕的角色顯隱與導頁。
+
+### 7.3 匯出 CSV — `ExportButton`
+
+- **角色顯隱**：`role !== 'admin' && role !== 'user'` 時**不**渲染（viewer 隱藏）；純 UX，非安全邊界（[`07 §3.4`](./07-admin-rbac-audit.md)）。
+- **資料來源**：當前已渲染的列表 `records`（一次 `GET /api/cms/deposit-records` 回應，≤ `page_size` 筆）。`ExportButton` 接 `records` prop；**僅匯出當前頁**，不跨頁重抓（範圍限制見 [`06 §8`](./06-topup-records-domain.md)）。
+- **產檔**：呼叫純函式 `toDepositCsv(records)`（`src/lib/topups/export-csv.ts`）得含 UTF-8 BOM 的 CSV 字串 → `Blob` → `URL.createObjectURL` → 觸發 `<a download>` 下載。檔名建議 `deposit-records-<yyyymmdd>.csv`。
+- **匯出欄位（螢幕可見）**：`createdAt` / `playerName` / `referenceNo` / `amount`（**整數原值**，不格式化）/ `currency` / `paymentMethod`（中文 label）/ `status`（中文 label）。**不含** `internalNote` / `operatorId` / `operatorIp`——後端對 viewer 未遮罩，前端不主動匯出這些以避免放大外洩（[`07 §5`](./07-admin-rbac-audit.md)）。
+- **空列表**：`records.length === 0` 時頁面顯示 EmptyState（§8），不渲染 `ExportButton`（無資料可匯出）。
+
+> **為何接 `records` prop 而非自行 fetch**：列表頁是 RSC，`records` 已在 server 端取得並傳給 `ResultTable`；`ExportButton` 與 `ResultTable` 同層接同一份 `records`，避免重複請求與資料不一致。
 
 ---
 
@@ -375,7 +389,7 @@ it('should render ellipsis (…) when pages exceed the visible window')
 it('should expose aria-busy during the route transition')
 ```
 
-### 12.7 `_components/create-button.test.tsx`
+### 12.7 `_components/create-deposit-button.test.tsx`
 
 ```ts
 it('should NOT render when session.role is "viewer"')
@@ -384,7 +398,18 @@ it('should render when session.role is "admin"')
 it('should navigate to /players/[id]/topups/new when clicked')
 ```
 
-### 12.8 `page.test.tsx`（整合）
+### 12.8 `_components/export-button.test.tsx`
+
+```ts
+it('should NOT render when session.role is "viewer"')
+it('should render when session.role is "user"')
+it('should render when session.role is "admin"')
+it('should generate a CSV blob download from the provided records on click')
+```
+
+> CSV 產生純函式 `toDepositCsv` 的測試（BOM / 表頭 / 跳脫 / 金額整數原值 / 不含敏感欄）見 [`06 §11.7`](./06-topup-records-domain.md)。
+
+### 12.9 `page.test.tsx`（整合）
 
 > **測試模式**：async Server Component 的資料分支抽為內層 async 元件 `TopupsResult` 並 export，測試直接 `await` 後 render 該元件（RTL 無法解析巢狀 RSC）。
 
@@ -417,7 +442,7 @@ test('reload preserves filter state via URL')
 
 ## 13. 開放問題
 
-- [ ] 後端**無匯出端點**：CSV 匯出功能已移除，待後端提供後再設計（見 [`06 §8`](./06-topup-records-domain.md)）
+- [x] **CSV 匯出**：v1 採前端 client 端從當前頁 `data` 產檔（§7.3）；「匯出全部符合篩選」（跨頁）與伺服器端稽核待後端 export 端點（見 [`06 §8`](./06-topup-records-domain.md)）
 - [ ] 後端**無玩家詳情端點**：無法在進入列表前驗證 `player_id` 是否存在（不存在僅回空陣列）；待後端補 members 詳情端點
 - [x] OFFSET 分頁改頁碼 UI（`1 2 3 … N`，因有 `meta.total`）：已實作（共用 `@/components/topups/pagination.tsx`，§6）。
 - [ ] 列表新增「最近活動」等冗餘欄位？v1 純儲值欄位

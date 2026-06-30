@@ -4,6 +4,7 @@ import { recordMetric } from '@/lib/observability/ui-metrics';
 import { parseListQuery } from '@/lib/topups/query-params';
 import { FilterBar } from './_components/filter-bar';
 import { CreateDepositButton } from './_components/create-deposit-button';
+import { ExportButton } from './_components/export-button';
 import { ResultTable } from './_components/result-table';
 import { Pagination } from '@/components/topups/pagination';
 import { EmptyState } from './_components/empty-state';
@@ -76,6 +77,9 @@ export async function TopupsResult({
 
     return (
       <div className="space-y-2">
+        <div className="flex justify-end">
+          <ExportButton records={records} />
+        </div>
         <ResultTable records={records} playerId={playerId} />
         <Pagination
           basePath={`/players/${playerId}/topups`}
