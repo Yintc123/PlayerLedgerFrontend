@@ -62,7 +62,7 @@ GET /api/cms/deposit-records?<query>        # 不帶 player_id → 全玩家
 ### A3.2 與 spec 10 的唯一語意差
 
 - spec 10：`player_id` 由**路由** `[playerId]` 帶入，恆存在。
-- 本頁：`player_id` 由**選用篩選**帶入；省略時 `listDeposits({})` 回 `MOCK_ALL_DEPOSITS`（後端則回全玩家），見 `src/lib/topups/list.ts:60-62`。
+- 本頁：`player_id` 由**選用篩選**帶入；省略時 `listDeposits({})` 不帶 `player_id` 呼叫 `cmsRequest('/cms/deposit-records')`，後端回全玩家，見 `src/lib/topups/list.ts`。
 
 ### A3.3 Response / 分頁
 
