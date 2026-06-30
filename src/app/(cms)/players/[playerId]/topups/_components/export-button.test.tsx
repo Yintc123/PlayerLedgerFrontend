@@ -36,7 +36,7 @@ function renderWithRole(role: Role, records: DepositRecord[] = []) {
   return render(
     <SessionProvider initialSession={session}>
       <ExportButton records={records} />
-    </SessionProvider>,
+    </SessionProvider>
   );
 }
 
@@ -73,9 +73,7 @@ describe('ExportButton', () => {
       configurable: true,
       writable: true,
     });
-    const clickSpy = vi
-      .spyOn(HTMLAnchorElement.prototype, 'click')
-      .mockImplementation(() => {});
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
 
     renderWithRole('admin', [sampleRecord]);
     await userEvent.click(screen.getByRole('button', { name: /匯出/ }));

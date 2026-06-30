@@ -55,9 +55,7 @@ describe('toDepositCsv', () => {
   });
 
   it('should escape comma / double-quote / newline by wrapping in quotes and doubling inner quotes', () => {
-    const csv = toDepositCsv([
-      makeRecord({ playerName: 'Wang, Jr.', referenceNo: 'a"b\nc' }),
-    ]);
+    const csv = toDepositCsv([makeRecord({ playerName: 'Wang, Jr.', referenceNo: 'a"b\nc' })]);
     const dataRow = csv.slice(BOM.length).split('\r\n')[1];
     expect(dataRow).toContain('"Wang, Jr."');
     expect(dataRow).toContain('"a""b\nc"');
@@ -65,7 +63,7 @@ describe('toDepositCsv', () => {
 
   it('should output payment method and status as Chinese labels', () => {
     const [, dataRow] = rows(
-      toDepositCsv([makeRecord({ paymentMethod: 'bank_transfer', status: 'completed' })]),
+      toDepositCsv([makeRecord({ paymentMethod: 'bank_transfer', status: 'completed' })])
     );
     const cells = dataRow.split(',');
     expect(cells[5]).toBe('銀行轉帳');
