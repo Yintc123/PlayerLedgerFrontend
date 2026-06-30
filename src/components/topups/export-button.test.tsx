@@ -25,7 +25,11 @@ const sampleRecord: DepositRecord = {
   updatedAt: '2026-06-20T03:12:00Z',
 };
 
-function renderWithRole(role: Role, records: DepositRecord[] = []) {
+function renderWithRole(
+  role: Role,
+  records: DepositRecord[] = [],
+  props: { includePlayerId?: boolean } = {}
+) {
   const session: ClientSession = {
     userId: 'u1',
     clientId: 'cms-web',
@@ -35,9 +39,14 @@ function renderWithRole(role: Role, records: DepositRecord[] = []) {
   };
   return render(
     <SessionProvider initialSession={session}>
-      <ExportButton records={records} />
+      <ExportButton records={records} includePlayerId={props.includePlayerId} />
     </SessionProvider>
   );
+}
+
+/** 從 createObjectURL mock 收到的 blob 讀回文字內容。 */
+async function readBlobText(blob: Blob): Promise<string> {
+  return blob.text();
 }
 
 afterEach(() => {
@@ -84,5 +93,28 @@ describe('ExportButton', () => {
     expect(blob.type).toContain('text/csv');
     expect(clickSpy).toHaveBeenCalledOnce();
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:mock');
+  });
+
+  it('should pass includePlayerId through to toDepositCsv (CSV contains the 玩家 ID column) when set', async () => {
+    const createObjectURL = vi.fn((_blob: Blob) => 'blob:mock');
+    Object.defineProperty(URL, 'createObjectURL', {
+      value: createObjectURL,
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      value: vi.fn(),
+      configurable: true,
+      writable: true,
+    });
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+    renderWithRole('admin', [sampleRecord], { includePlayerId: true });
+    await userEvent.click(screen.getByRole('button', { name: /匯出/ }));
+
+    const blob = createObjectURL.mock.calls[0][0] as Blob;
+    const csv = await readBlobText(blob);
+    expect(csv).toContain('玩家 ID');
+    expect(csv).toContain(sampleRecord.playerId);
   });
 });

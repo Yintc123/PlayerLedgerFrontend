@@ -85,4 +85,23 @@ describe('toDepositCsv', () => {
     const csv = toDepositCsv([]);
     expect(csv).toBe(BOM + '建立時間,玩家,參考號,金額,幣別,支付方式,狀態');
   });
+
+  it('should keep the spec-10 seven-column output unchanged when includePlayerId is omitted/false', () => {
+    const withFalse = toDepositCsv([makeRecord()], { includePlayerId: false });
+    const omitted = toDepositCsv([makeRecord()]);
+    expect(withFalse).toBe(omitted);
+    expect(rows(withFalse)[0]).toBe('建立時間,玩家,參考號,金額,幣別,支付方式,狀態');
+  });
+
+  it('should insert a "玩家 ID" header column after "玩家" when includePlayerId is true', () => {
+    const [header] = rows(toDepositCsv([makeRecord()], { includePlayerId: true }));
+    expect(header).toBe('建立時間,玩家,玩家 ID,參考號,金額,幣別,支付方式,狀態');
+  });
+
+  it('should output the playerId (UUID) value in the player-ID column when includePlayerId is true', () => {
+    const playerId = '0193b3f4-0000-7000-8000-00000000aaaa';
+    const [, dataRow] = rows(toDepositCsv([makeRecord({ playerId })], { includePlayerId: true }));
+    // 建立時間, 玩家, 玩家 ID(index 2), 參考號, ...
+    expect(dataRow.split(',')[2]).toBe(playerId);
+  });
 });

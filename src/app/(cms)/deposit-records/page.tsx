@@ -3,6 +3,7 @@ import { isApiError } from '@/lib/api/errors';
 import { recordMetric } from '@/lib/observability/ui-metrics';
 import { parseListQuery } from '@/lib/topups/query-params';
 import { Pagination } from '@/components/topups/pagination';
+import { ExportButton } from '@/components/topups/export-button';
 import type { DepositListQuery } from '@/lib/topups/types';
 import { FilterBar } from './_components/filter-bar';
 import { ActivePlayerChip } from './_components/active-player-chip';
@@ -75,6 +76,9 @@ export async function DepositsResult({ query }: { query: DepositListQuery }) {
           <EmptyState />
         ) : (
           <div className="space-y-2">
+            <div className="flex justify-end">
+              <ExportButton records={records} includePlayerId />
+            </div>
             <ResultTable records={records} query={query} />
             <Pagination
               basePath="/deposit-records"
