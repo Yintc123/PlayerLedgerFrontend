@@ -1,45 +1,50 @@
 # PlayerLedger Frontend — 規格書合規狀態
 
-**更新日期**: 2026-06-29
-**測試狀態**: 371 unit tests passing · type-check ✅ · lint ✅
-**整體合規**: 🟡 **基礎建設層完成;玩家領域待後端 `/players/*` 端點**
+**更新日期**: 2026-06-30
+**測試狀態**: 815 unit/component tests passing · 3 skipped · 88 test files · type-check ✅ · lint ✅
+**整體合規**: ✅ **01–14 全部實作完成,資料層串接真實後端 `/cms/*` 端點**
 
-> 本文件為跨全部 14 份 spec 的**單一真實狀態來源**。先前版本只涵蓋 01–04 並聲稱「100% 完成」,
-> 未提及 05–13——已修正為下方的逐 spec 狀態。
+> 本文件為跨全部 14 份 spec 的**單一真實狀態來源**。
+> 2026-06-29 版本標記 05/06/08–11 為「待後端」;**後端已在 `openapi.yaml` 補上 `/cms/players*`
+> 與 `/cms/deposit-records*`**,前端已依 SDD/TDD 完成串接,故本版全面改為實作完成(見下「阻塞解除」)。
 
 ---
 
 ## 總覽
 
-| Spec | 主題                | 狀態        | 說明                                                                                                          |
-| ---- | ------------------- | ----------- | ------------------------------------------------------------------------------------------------------------- |
-| 01   | BFF 架構            | ✅ 完成     | proxy / health(含 route 測試)/ 安全標頭 / XFF append / rate limit                                             |
-| 02   | 認證 Session        | ✅ 完成     | login / logout / refresh(mutex + CAS)/ cookie / client session                                                |
-| 03   | 可觀測性            | ✅ 完成     | pino logger + redact / EMF metrics / OTel / 前端 telemetry 端點                                               |
-| 04   | Dockerfile & Build  | ✅ 完成     | 多階段建置 / standalone / 非 root / HEALTHCHECK                                                               |
-| 05   | 玩家查詢領域        | ⛔ 待後端   | 依賴 `/players/search`、`/players/{id}`——**後端 OpenAPI 未提供**                                              |
-| 06   | 儲值紀錄領域        | ⛔ 待後端   | 依賴 `/players/{id}/topups/*`、export——**後端 OpenAPI 未提供**                                                |
-| 07   | Admin RBAC & Audit  | 🟡 核心完成 | role decode + ClientSession.role + layout 注入完成;UI 閘門(ExportButton 等)待 05/06 畫面                      |
-| 08   | 畫面:玩家搜尋       | ⛔ 待後端   | 依賴 spec 05                                                                                                  |
-| 09   | 畫面:玩家詳情       | ⛔ 待後端   | 依賴 spec 05                                                                                                  |
-| 10   | 畫面:儲值列表       | ⛔ 待後端   | 依賴 spec 06                                                                                                  |
-| 11   | 畫面:儲值詳情       | ⛔ 待後端   | 依賴 spec 06                                                                                                  |
-| 12   | 註冊領域            | ✅ 完成     | 路由 / CSRF / rate limit / 錯誤碼對應 / 驗證分工                                                              |
-| 13   | 畫面:註冊           | ✅ 完成     | 表單 / 行為 / login 頁強化 / a11y(含 `aria-busy`)                                                             |
-| 14   | 畫面:全玩家儲值紀錄 | ✅ 完成     | 跨玩家總覽;篩選 / 排序 / 分頁 / 玩家聚焦 + client 端 CSV 匯出(含玩家 ID);重用 `/cms/deposit-records` 扁平資源 |
+| Spec | 主題                | 狀態    | 說明                                                                                                                                            |
+| ---- | ------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| 01   | BFF 架構            | ✅ 完成 | proxy / health(含 route 測試)/ 安全標頭 / XFF append / rate limit                                                                               |
+| 02   | 認證 Session        | ✅ 完成 | login / logout / refresh(mutex + CAS)/ cookie / client session                                                                                  |
+| 03   | 可觀測性            | ✅ 完成 | pino logger + redact / EMF metrics / OTel / 前端 telemetry 端點                                                                                 |
+| 04   | Dockerfile & Build  | ✅ 完成 | 多階段建置 / standalone / 非 root / HEALTHCHECK                                                                                                 |
+| 05   | 玩家查詢領域        | ✅ 完成 | `src/lib/players/*`(search / get / transform);串接 `/cms/players`、`/cms/players/{id}`                                                          |
+| 06   | 儲值紀錄領域        | ✅ 完成 | `src/lib/topups/*`(list / get / create / summary / export-csv / query-params);串接 `/cms/deposit-records*`、`/cms/players/{id}/deposit-summary` |
+| 07   | Admin RBAC & Audit  | ✅ 完成 | role decode + ClientSession.role + layout 注入;角色感知 UI(ExportButton / CreateDepositButton)已隨 06/10/14 上線                                |
+| 08   | 畫面:玩家搜尋       | ✅ 完成 | `(cms)/players/`;`searchPlayers`(keyset cursor);search-form / result-list / load-more                                                           |
+| 09   | 畫面:玩家詳情       | ✅ 完成 | `(cms)/players/[playerId]/`;`getPlayer` + `getPlayerTopupSummary` + `listDeposits`(近期紀錄)                                                    |
+| 10   | 畫面:儲值列表       | ✅ 完成 | `(cms)/players/[playerId]/topups/`(含 `new/` 建立子路由);`listDeposits` + `createDeposit`                                                       |
+| 11   | 畫面:儲值詳情       | ✅ 完成 | `(cms)/players/[playerId]/topups/[recordId]/`;`getDeposit`;狀態時間軸 / related links                                                           |
+| 12   | 註冊領域            | ✅ 完成 | 路由 / CSRF / rate limit / 錯誤碼對應 / 驗證分工                                                                                                |
+| 13   | 畫面:註冊           | ✅ 完成 | 表單 / 行為 / login 頁強化 / a11y(含 `aria-busy`)                                                                                               |
+| 14   | 畫面:全玩家儲值紀錄 | ✅ 完成 | `(cms)/deposit-records/`;`listDeposits`(不帶 `player_id` → 全玩家)+ client 端 CSV 匯出(含玩家 ID)                                               |
 
 ---
 
-## ⛔ 阻塞說明:玩家領域(05 / 06 / 08–11)
+## ✅ 阻塞解除:玩家領域(05 / 06 / 08–11)
 
-前端 spec 05/06/08–11 圍繞 `/players/*` 契約設計,但**後端 `PlayerLedgerBackend/schema/openapi.yaml`
-實際只提供** `/auth/*`、`/cms/deposit-records`、`/cms/deposit-records/{id}`、`/me/deposit-records`,
-**沒有 `Player` 實體,也沒有 `/players/*` 端點**。spec 自己亦標註這些端點「後端尚未實作 / 規劃中」。
+先前 spec 05/06/08–11 圍繞 `/cms/players*` 與 `/cms/deposit-records*` 契約設計,但 2026-06-29 時
+後端 `PlayerLedgerBackend/schema/openapi.yaml` 尚未提供 `Player` 實體與相關端點,故此領域維持未實作。
 
-依 CLAUDE.md 的 **SDD**(OpenAPI Schema 為唯一契約、不得對不存在端點猜測性實作),此領域維持未實作。
+**現況(2026-06-30)**:後端 `openapi.yaml` 已定義所需端點,前端資料層全數串接**真實後端**(無 mock):
 
-**決議(2026-06-29)**:等後端在 `openapi.yaml` 補上 `/players/*` 與 `Player` schema 後,再依 SDD 先產型別、
-再 TDD 實作 05 → 06 → 08 → 09 → 10 → 11,以及 07 的角色感知 UI(§10.3 ExportButton / paymentChannel、§10.4 e2e)。
+- `/cms/players`、`/cms/players/{id}`、`/cms/players/{id}/deposit-summary`
+- `/cms/deposit-records`、`/cms/deposit-records/{id}`(GET / POST)、`/me/deposit-records`
+
+所有資料模組經 `src/lib/api-client/cms.ts` 的 `cmsRequest`(帶 session access token + trace)發出 HTTP 請求,
+envelope 解開 + snake_case → camelCase transform。依 CLAUDE.md 的 SDD/TDD,已先對齊 schema 再 TDD 實作。
+
+> **遺留清理**:`src/lib/mock/dataset.ts`(早期 mock 資料層)目前**零引用**(連測試都未 import),可移除。
 
 ---
 
@@ -72,12 +77,47 @@
 
 - 多階段 `Dockerfile`、`output: 'standalone'`、非 root(UID 1001)、tini、HEALTHCHECK、`.dockerignore`
 
-### Spec 07 — Admin RBAC(核心)
+### Spec 05 — 玩家查詢領域
+
+- `src/lib/players/`:`search.ts`(`searchPlayers` → `/cms/players`,keyset cursor 分頁)、`get.ts`(`getPlayer` → `/cms/players/{id}`)、`transform.ts`、`types.ts`
+- 測試:`search.test.ts` / `get.test.ts` / `transform.test.ts`
+
+### Spec 06 — 儲值紀錄領域
+
+- `src/lib/topups/`:`list.ts`(`/cms/deposit-records`,offset 分頁、多值重複 key)、`get.ts`(`/cms/deposit-records/{id}`)、`create.ts`(POST)、`summary.ts`(`/cms/players/{id}/deposit-summary`)、`transform.ts`、`types.ts`、`labels.ts`、`query-params.ts`
+- `export-csv.ts`:client 端 CSV 純函式(`toDepositCsv`,UTF-8 BOM、RFC 4180、`includePlayerId` 選項);後端**無** export 端點,匯出在前端
+- 測試:list / transform / summary / labels / query-params / export-csv
+
+### Spec 07 — Admin RBAC
 
 - `src/lib/auth/decode-token.ts`:`decodeAccessToken` + `Role` / `UserType` / `TokenClaims`(decode-only 不驗簽,§3.2)
 - `src/lib/session/client-session.tsx`:`ClientSession` 新增 `role`(§3.3,單一字串非陣列)
 - `src/app/(cms)/layout.tsx`:SSR decode role 注入,並擋 `utype !== 'cms'`(防 session 污染)
-- **待做**:角色感知 UI(ExportButton / paymentChannel)與 e2e forbidden 流程——綁定 05/06 畫面
+- 角色感知 UI 已上線:`@/components/topups/export-button.tsx`(ExportButton,admin/user 可見)、`CreateDepositButton`;PII 遮罩由後端依角色回傳
+
+### Spec 08 — 畫面:玩家搜尋
+
+- `src/app/(cms)/players/page.tsx`(+ `loading.tsx`、`_lib/query-params.ts`、`_lib/types.ts`)
+- `_components/`:search-form / result-row / result-list / load-more / empty-state / error-state
+- 經 `searchPlayers` 串接 `/cms/players`;URL 為查詢狀態唯一來源
+
+### Spec 09 — 畫面:玩家詳情
+
+- `src/app/(cms)/players/[playerId]/page.tsx`(+ `error.tsx` / `loading.tsx` / `not-found.tsx`、`_lib/thresholds.ts`)
+- `_components/`:profile-card / status-tag / recent-topups / topup-summary-card / copy-button / forbidden-state / error-block
+- `getPlayer` + `getPlayerTopupSummary` + `listDeposits`(近期紀錄)
+
+### Spec 10 — 畫面:儲值列表(單一玩家)
+
+- `src/app/(cms)/players/[playerId]/topups/page.tsx`(+ `error.tsx` / `loading.tsx`、`_lib/types.ts`)
+- `_components/`:result-table / result-row / filter-bar / empty-state / error-state / create-deposit-button;`new/` 建立子路由(POST create)
+- `listDeposits({ playerId, ...query })` + `createDeposit`;`ExportButton` / `Pagination` 已提升為共用元件
+
+### Spec 11 — 畫面:儲值詳情
+
+- `src/app/(cms)/players/[playerId]/topups/[recordId]/page.tsx`(+ `error.tsx` / `loading.tsx` / `not-found.tsx`)
+- `_components/`:transaction-card / status-timeline / status-badge / related-links / copy-button / forbidden-state
+- `getDeposit` 串接 `/cms/deposit-records/{id}`
 
 ### Spec 12 / 13 — CMS 註冊
 
@@ -97,12 +137,12 @@
 ## 測試
 
 ```bash
-npm run test         # 371 unit tests
+npm run test         # 815 passing · 3 skipped · 88 files
 npm run type-check   # tsc --noEmit
 npm run lint         # eslint --max-warnings 0
-npm run test:e2e     # Playwright
+npm run test:e2e     # Playwright(各 spec §e2e 清單;未計入上方單元/元件數)
 ```
 
 ---
 
-**簽核**: Claude Code · **規格範圍**: 01–14 · **狀態**: 基礎建設完成,玩家領域待後端契約
+**簽核**: Claude Code · **規格範圍**: 01–14 · **狀態**: 全部實作完成,資料層串接真實後端
