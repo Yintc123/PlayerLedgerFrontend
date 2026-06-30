@@ -21,6 +21,7 @@ export function PlayerStatusTag({
   const config = STATUS_CONFIG[status];
   return (
     <span
+      data-component="PlayerStatusTag"
       data-status={status}
       className={cn(
         'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset',

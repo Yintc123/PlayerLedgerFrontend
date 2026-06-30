@@ -47,7 +47,7 @@ export function DateRangePicker({
   );
 
   return (
-    <div>
+    <div data-component="DateRangePicker">
       <div className="flex items-center gap-2">
         <label htmlFor={fromId} className="sr-only">
           起始日

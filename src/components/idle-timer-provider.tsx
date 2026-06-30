@@ -181,13 +181,14 @@ export function IdleTimerProvider({ children, policyOverride }: IdleTimerProvide
   };
 
   return (
-    <>
+    // display:contents → 不產生 box、零佈局影響，僅作為承載 data-component 的標記節點
+    <div data-component="IdleTimerProvider" className="contents">
       {children}
       <IdleWarningModal
         countdownSec={countdownSec}
         onContinue={onContinue}
         onLogoutNow={onLogoutNow}
       />
-    </>
+    </div>
   );
 }

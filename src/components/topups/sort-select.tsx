@@ -24,7 +24,7 @@ export function SortSelect({
   onChange: (value: DepositSort) => void;
 }) {
   return (
-    <div className="relative">
+    <div data-component="SortSelect" className="relative">
       <select
         aria-label="排序"
         value={value ?? '-created_at'}
